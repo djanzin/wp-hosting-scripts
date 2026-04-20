@@ -70,6 +70,26 @@ DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
     php8.3-soap php8.3-bcmath php8.3-imagick php8.3-opcache
 log "Pakete installiert"
 
+# ── Swap ──────────────────────────────────────────────────────────────────
+if [[ ! -f /swapfile ]]; then
+    TOTAL_RAM_MB=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
+    if   [[ $TOTAL_RAM_MB -lt 2048 ]];  then SWAP_SIZE="2G"
+    elif [[ $TOTAL_RAM_MB -lt 8192 ]];  then SWAP_SIZE="${TOTAL_RAM_MB}M"
+    else                                     SWAP_SIZE="4G"
+    fi
+    fallocate -l "$SWAP_SIZE" /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    echo 'vm.swappiness=10'           >> /etc/sysctl.conf
+    echo 'vm.vfs_cache_pressure=50'   >> /etc/sysctl.conf
+    sysctl -p &>/dev/null
+    log "Swap konfiguriert (${SWAP_SIZE}, swappiness=10)"
+else
+    warn "Swapfile existiert bereits — übersprungen"
+fi
+
 # ── WP-CLI ────────────────────────────────────────────────────────────────
 curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
 chmod +x wp-cli.phar
@@ -196,6 +216,25 @@ EOF
 rm -f /etc/nginx/sites-enabled/default
 log "Nginx konfiguriert"
 
+# ── Log-Rotation ──────────────────────────────────────────────────────────
+cat > /etc/logrotate.d/wordpress-hosting <<'EOF'
+/var/log/nginx/*.log /var/log/php/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 www-data adm
+    sharedscripts
+    postrotate
+        nginx -s reopen 2>/dev/null || true
+        systemctl reload php8.3-fpm 2>/dev/null || true
+    endscript
+}
+EOF
+log "Log-Rotation konfiguriert (14 Tage, täglich komprimiert)"
+
 # ── phpMyAdmin ────────────────────────────────────────────────────────────
 info "phpMyAdmin wird installiert..."
 PMA_VERSION="5.2.2"
@@ -315,6 +354,37 @@ bantime  = 3600
 EOF
 log "Fail2ban konfiguriert"
 
+# ── SSH Hardening ─────────────────────────────────────────────────────────
+SSH_CONFIG="/etc/ssh/sshd_config"
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'          "$SSH_CONFIG"
+sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/'                  "$SSH_CONFIG"
+sed -i 's/^#*LoginGraceTime.*/LoginGraceTime 20/'             "$SSH_CONFIG"
+sed -i 's/^#*X11Forwarding.*/X11Forwarding no/'               "$SSH_CONFIG"
+sed -i 's/^#*AllowTcpForwarding.*/AllowTcpForwarding no/'     "$SSH_CONFIG"
+
+echo ""
+read -rp "SSH Public Key für ubuntu-User hinterlegen? (leer = überspringen): " SSH_PUB_KEY
+if [[ -n "$SSH_PUB_KEY" ]]; then
+    mkdir -p /home/ubuntu/.ssh
+    echo "$SSH_PUB_KEY" >> /home/ubuntu/.ssh/authorized_keys
+    chmod 700 /home/ubuntu/.ssh
+    chmod 600 /home/ubuntu/.ssh/authorized_keys
+    chown -R ubuntu:ubuntu /home/ubuntu/.ssh 2>/dev/null || true
+    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' "$SSH_CONFIG"
+    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/'    "$SSH_CONFIG"
+    log "SSH Key hinterlegt — Passwort-Login deaktiviert"
+else
+    warn "Kein SSH Key — Passwort-Login bleibt aktiv"
+fi
+systemctl restart sshd
+
+# ── Netdata ───────────────────────────────────────────────────────────────
+info "Netdata wird installiert..."
+wget -qO /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh
+bash /tmp/netdata-kickstart.sh --non-interactive --stable-channel --disable-telemetry 2>&1 | tail -5
+rm -f /tmp/netdata-kickstart.sh
+log "Netdata installiert (Port 19999)"
+
 # ── UFW ───────────────────────────────────────────────────────────────────
 ufw --force reset
 ufw default deny incoming
@@ -322,9 +392,11 @@ ufw default allow outgoing
 ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow 8080/tcp
+ufw allow 8080/tcp
 ufw allow 8090/tcp
+ufw allow 19999/tcp
 ufw --force enable
-log "Firewall konfiguriert (22, 80, 8080, 8090)"
+log "Firewall konfiguriert (22, 80, 8080, 8090, 19999)"
 
 # ── Verzeichnisstruktur ───────────────────────────────────────────────────
 mkdir -p /var/www
@@ -371,9 +443,11 @@ echo -e "  Filebrowser:   ${BOLD}http://$(hostname -I | awk '{print $1}'):8090${
 echo -e "  FB Benutzer:   ${BOLD}admin${NC}"
 echo -e "  FB Passwort:   ${BOLD}${FB_ADMIN_PASS}${NC}"
 echo ""
+echo -e "  Netdata:       ${BOLD}http://$(hostname -I | awk '{print $1}'):19999${NC}"
 echo -e "  Konfiguration: ${BOLD}/etc/wp-hosting/config${NC}"
 echo -e "  Sites:         ${BOLD}/etc/wp-hosting/sites/<domain>.txt${NC}"
 echo ""
 echo -e "${YELLOW}  → Filebrowser-Passwort notieren!${NC}"
-echo -e "${YELLOW}  → NPM Proxy-Hosts für Port 8080 und 8090 anlegen.${NC}"
+echo -e "${YELLOW}  → NPM Proxy-Hosts für Port 8080, 8090 und 19999 anlegen.${NC}"
+echo -e "${YELLOW}  → Netdata in Uptime Kuma als Monitor hinzufügen.${NC}"
 echo ""

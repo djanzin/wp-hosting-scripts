@@ -25,9 +25,12 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL)
 |---|---|---|---|
 | `proxmox-create-template.sh` | Proxmox Host | Ubuntu 24.04 Cloud-init Template erstellen | Einmalig |
 | `proxmox-create-vm.sh` | Proxmox Host | VM aus Template klonen & konfigurieren | Pro neue VM |
-| `setup-db.sh` | Datenbank-VM | MariaDB installieren & optimieren | Einmalig pro VM |
-| `setup-web.sh` | Web-VM | Nginx, PHP, Redis, phpMyAdmin, Filebrowser | Einmalig pro VM |
+| `setup-db.sh` | Datenbank-VM | MariaDB, Swap, Netdata, SSH-Hardening | Einmalig pro VM |
+| `setup-web.sh` | Web-VM | Nginx, PHP, Redis, phpMyAdmin, Filebrowser, Netdata | Einmalig pro VM |
 | `install-wp.sh` | Web-VM | Neue WordPress/WooCommerce-Site anlegen | Pro neue Site |
+| `delete-wp.sh` | Web-VM | Site vollständig entfernen | Bei Bedarf |
+| `update-wp.sh` | Web-VM | WordPress Core, Plugins, Themes aktualisieren | Regelmäßig |
+| `list-sites.sh` | Web-VM | Alle Sites mit Status anzeigen | Bei Bedarf |
 
 ---
 
@@ -100,6 +103,21 @@ Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 
 ---
 
+### Site verwalten
+
+```bash
+# Übersicht aller Sites mit Status
+sudo bash list-sites.sh
+
+# Alle Sites aktualisieren (Core + Plugins + Themes)
+sudo bash update-wp.sh
+
+# Site vollständig entfernen
+sudo bash delete-wp.sh
+```
+
+---
+
 ## Was wird installiert
 
 ### Web-VM
@@ -109,12 +127,19 @@ Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 - WP-CLI
 - phpMyAdmin auf Port 8080 (verbunden mit Datenbank-VM)
 - Filebrowser auf Port 8090 (Zugriff auf alle Sites unter /var/www)
+- Netdata Monitoring auf Port 19999
+- Swap (dynamisch berechnet, swappiness=10)
+- Log-Rotation (14 Tage, täglich komprimiert)
 - Fail2ban, UFW
+- SSH-Hardening (Root-Login deaktiviert, optional Key-only Auth)
 
 ### Datenbank-VM
 - MariaDB (InnoDB Buffer dynamisch: 50 % des verfügbaren RAM)
 - Remote-Zugriff nur von Web-VM-IPs
 - Slow Query Log aktiviert
+- Netdata Monitoring auf Port 19999
+- Swap (dynamisch berechnet)
+- SSH-Hardening
 
 ### Pro Site (install-wp.sh)
 - Nginx-Vhost

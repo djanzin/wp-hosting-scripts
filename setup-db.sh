@@ -36,6 +36,25 @@ DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
     curl wget ufw ca-certificates mariadb-server
 log "Pakete installiert"
 
+# ── Swap ──────────────────────────────────────────────────────────────────
+if [[ ! -f /swapfile ]]; then
+    TOTAL_RAM_MB=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
+    if   [[ $TOTAL_RAM_MB -lt 2048 ]];  then SWAP_SIZE="2G"
+    elif [[ $TOTAL_RAM_MB -lt 8192 ]];  then SWAP_SIZE="${TOTAL_RAM_MB}M"
+    else                                     SWAP_SIZE="4G"
+    fi
+    fallocate -l "$SWAP_SIZE" /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    echo 'vm.swappiness=10'           >> /etc/sysctl.conf
+    sysctl -p &>/dev/null
+    log "Swap konfiguriert (${SWAP_SIZE}, swappiness=10)"
+else
+    warn "Swapfile existiert bereits — übersprungen"
+fi
+
 # ── MariaDB konfigurieren ─────────────────────────────────────────────────
 # Puffergröße dynamisch an verfügbaren RAM anpassen (50% für InnoDB)
 TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
@@ -127,8 +146,40 @@ for VM_IP in "${VM_IPS[@]}"; do
     log "UFW: MySQL-Zugriff von ${VM_IP} erlaubt"
 done
 
+ufw allow 19999/tcp
 ufw --force enable
-log "Firewall konfiguriert"
+log "Firewall konfiguriert (22, 3306 von Web-VMs, 19999)"
+
+# ── SSH Hardening ─────────────────────────────────────────────────────────
+SSH_CONFIG="/etc/ssh/sshd_config"
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'          "$SSH_CONFIG"
+sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/'                  "$SSH_CONFIG"
+sed -i 's/^#*LoginGraceTime.*/LoginGraceTime 20/'             "$SSH_CONFIG"
+sed -i 's/^#*X11Forwarding.*/X11Forwarding no/'               "$SSH_CONFIG"
+sed -i 's/^#*AllowTcpForwarding.*/AllowTcpForwarding no/'     "$SSH_CONFIG"
+
+echo ""
+read -rp "SSH Public Key für ubuntu-User hinterlegen? (leer = überspringen): " SSH_PUB_KEY
+if [[ -n "$SSH_PUB_KEY" ]]; then
+    mkdir -p /home/ubuntu/.ssh
+    echo "$SSH_PUB_KEY" >> /home/ubuntu/.ssh/authorized_keys
+    chmod 700 /home/ubuntu/.ssh
+    chmod 600 /home/ubuntu/.ssh/authorized_keys
+    chown -R ubuntu:ubuntu /home/ubuntu/.ssh 2>/dev/null || true
+    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' "$SSH_CONFIG"
+    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/'    "$SSH_CONFIG"
+    log "SSH Key hinterlegt — Passwort-Login deaktiviert"
+else
+    warn "Kein SSH Key — Passwort-Login bleibt aktiv"
+fi
+systemctl restart sshd
+
+# ── Netdata ───────────────────────────────────────────────────────────────
+info "Netdata wird installiert..."
+wget -qO /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh
+bash /tmp/netdata-kickstart.sh --non-interactive --stable-channel --disable-telemetry 2>&1 | tail -5
+rm -f /tmp/netdata-kickstart.sh
+log "Netdata installiert (Port 19999)"
 
 # ── Services starten ───────────────────────────────────────────────────────
 systemctl enable mariadb
@@ -158,6 +209,9 @@ DB_ADMIN_USER=${ADMIN_USER}
 DB_ADMIN_PASS=${ADMIN_PASS}
 EOF
 chmod 600 /etc/wp-hosting/db-credentials.txt
+echo -e "  Netdata:       ${BOLD}http://$(hostname -I | awk '{print $1}'):19999${NC}"
+echo ""
 echo -e "${YELLOW}  → Zugangsdaten gespeichert: /etc/wp-hosting/db-credentials.txt${NC}"
 echo -e "${YELLOW}  → Unbedingt notieren — werden nur einmal angezeigt!${NC}"
+echo -e "${YELLOW}  → Netdata in Uptime Kuma als Monitor hinzufügen.${NC}"
 echo ""
