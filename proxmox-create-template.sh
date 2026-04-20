@@ -29,6 +29,19 @@ if qm status "$TEMPLATE_ID" &>/dev/null; then
     err "VM-ID ${TEMPLATE_ID} existiert bereits. Andere ID wählen oder bestehende VM löschen."
 fi
 
+read -rp "RAM in MB [Standard: 2048]: " TEMPLATE_RAM
+TEMPLATE_RAM=${TEMPLATE_RAM:-2048}
+[[ ! "$TEMPLATE_RAM" =~ ^[0-9]+$ ]] && err "Ungültiger RAM-Wert."
+
+read -rp "Disk-Größe in GB [Standard: 10]: " TEMPLATE_DISK
+TEMPLATE_DISK=${TEMPLATE_DISK:-10}
+[[ ! "$TEMPLATE_DISK" =~ ^[0-9]+$ ]] && err "Ungültiger Disk-Wert."
+
+read -rp "MAC-Adresse (leer = automatisch generieren): " TEMPLATE_MAC
+if [[ -n "$TEMPLATE_MAC" ]]; then
+    [[ ! "$TEMPLATE_MAC" =~ ^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$ ]] && err "Ungültige MAC-Adresse (Format: AA:BB:CC:DD:EE:FF)"
+fi
+
 # Verfügbare Storages anzeigen
 echo ""
 info "Verfügbare Storages:"
@@ -40,8 +53,14 @@ STORAGE=${STORAGE:-local-lvm}
 read -rp "Netzwerk-Bridge [Standard: vmbr0]: " BRIDGE
 BRIDGE=${BRIDGE:-vmbr0}
 
+# SSH Root Passwort generieren
+ROOT_SSH_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9!@#%^&*' | head -c 24)
+
 echo ""
 info "Template-ID: ${BOLD}${TEMPLATE_ID}${NC}"
+info "RAM:         ${BOLD}${TEMPLATE_RAM} MB${NC}"
+info "Disk:        ${BOLD}${TEMPLATE_DISK} GB${NC}"
+info "MAC:         ${BOLD}${TEMPLATE_MAC:-automatisch}${NC}"
 info "Storage:     ${BOLD}${STORAGE}${NC}"
 info "Bridge:      ${BOLD}${BRIDGE}${NC}"
 echo ""
@@ -63,11 +82,15 @@ fi
 # ── VM erstellen ──────────────────────────────────────────────────────────
 info "VM ${TEMPLATE_ID} wird erstellt..."
 
+# MAC-Adresse für net0 zusammenbauen
+NET0_CONFIG="virtio,bridge=${BRIDGE}"
+[[ -n "$TEMPLATE_MAC" ]] && NET0_CONFIG="virtio=${TEMPLATE_MAC},bridge=${BRIDGE}"
+
 qm create "$TEMPLATE_ID" \
     --name "ubuntu-2404-template" \
-    --memory 2048 \
+    --memory "$TEMPLATE_RAM" \
     --cores 2 \
-    --net0 "virtio,bridge=${BRIDGE}" \
+    --net0 "$NET0_CONFIG" \
     --ostype l26 \
     --machine q35 \
     --bios ovmf \
@@ -89,14 +112,33 @@ qm set "$TEMPLATE_ID" --ide2 "${STORAGE}:cloudinit"
 # Boot von der Disk
 qm set "$TEMPLATE_ID" --boot order=scsi0
 
-# Cloud-init Standardwerte
+# Cloud-init Standardwerte inkl. Root-SSH-Passwort
 qm set "$TEMPLATE_ID" \
     --citype nocloud \
     --ciuser ubuntu \
+    --cipassword "$ROOT_SSH_PASS" \
     --ipconfig0 "ip=dhcp"
 
-# Disk auf 10 GB vergrößern (Basis für spätere Klone)
-qm resize "$TEMPLATE_ID" scsi0 10G
+# SSH Root Login via Cloud-init user-data aktivieren
+cat > /tmp/vm-userdata.yaml <<EOF
+#cloud-config
+chpasswd:
+  expire: false
+ssh_pwauth: true
+disable_root: false
+runcmd:
+  - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+  - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+  - systemctl restart sshd
+  - echo "root:${ROOT_SSH_PASS}" | chpasswd
+EOF
+qm set "$TEMPLATE_ID" --cicustom "user=local:snippets/vm-userdata.yaml"
+mkdir -p /var/lib/vz/snippets
+cp /tmp/vm-userdata.yaml /var/lib/vz/snippets/vm-userdata.yaml
+rm -f /tmp/vm-userdata.yaml
+
+# Disk vergrößern
+qm resize "$TEMPLATE_ID" scsi0 "${TEMPLATE_DISK}G"
 
 log "VM ${TEMPLATE_ID} konfiguriert"
 
@@ -112,8 +154,14 @@ echo -e "${BOLD}╔════════════════════�
 echo -e "║   Template fertig ✓                          ║"
 echo -e "╚══════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  Template-ID:  ${BOLD}${TEMPLATE_ID}${NC}"
-echo -e "  Storage:      ${BOLD}${STORAGE}${NC}"
+echo -e "  Template-ID:     ${BOLD}${TEMPLATE_ID}${NC}"
+echo -e "  RAM:             ${BOLD}${TEMPLATE_RAM} MB${NC}"
+echo -e "  Disk:            ${BOLD}${TEMPLATE_DISK} GB${NC}"
+echo -e "  MAC:             ${BOLD}${TEMPLATE_MAC:-automatisch}${NC}"
+echo -e "  Storage:         ${BOLD}${STORAGE}${NC}"
 echo ""
+echo -e "${BOLD}  SSH Root-Passwort: ${ROOT_SSH_PASS}${NC}"
+echo ""
+echo -e "${YELLOW}  → Root-Passwort notieren!${NC}"
 echo -e "${YELLOW}  → Jetzt proxmox-create-vm.sh ausführen um VMs zu klonen.${NC}"
 echo ""
