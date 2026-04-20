@@ -1,0 +1,163 @@
+#!/bin/bash
+# Einmalige Einrichtung der Datenbank-VM (MariaDB, optimiert für WordPress/WooCommerce)
+# Voraussetzung: Ubuntu 24.04 LTS, als root ausführen
+
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
+log()  { echo -e "${GREEN}[✓]${NC} $1"; }
+warn() { echo -e "${YELLOW}[!]${NC} $1"; }
+err()  { echo -e "${RED}[✗]${NC} $1"; exit 1; }
+info() { echo -e "${BLUE}[i]${NC} $1"; }
+
+[[ $EUID -ne 0 ]] && err "Als root ausführen: sudo bash setup-db.sh"
+
+clear
+echo -e "${BOLD}"
+echo "╔══════════════════════════════════════════════╗"
+echo "║   Datenbank-VM Setup — Ubuntu 24.04          ║"
+echo "╚══════════════════════════════════════════════╝"
+echo -e "${NC}"
+
+read -rp "IPs der Web-VMs, kommagetrennt (z.B. 192.168.1.10,192.168.1.11): " WEB_VM_IPS
+[[ -z "$WEB_VM_IPS" ]] && err "Mindestens eine Web-VM-IP angeben."
+
+echo ""
+info "Datenbank-VM wird für ${BOLD}WordPress & WooCommerce${NC} optimiert"
+echo ""
+read -rp "Einrichtung starten? [j/N]: " confirm
+[[ "$confirm" != "j" && "$confirm" != "J" ]] && err "Abgebrochen."
+
+# ── System aktualisieren ───────────────────────────────────────────────────
+info "System wird aktualisiert..."
+apt-get update -q
+DEBIAN_FRONTEND=noninteractive apt-get upgrade -yq
+DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+    curl wget ufw ca-certificates mariadb-server
+log "Pakete installiert"
+
+# ── MariaDB konfigurieren ─────────────────────────────────────────────────
+# Puffergröße dynamisch an verfügbaren RAM anpassen (50% für InnoDB)
+TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+TOTAL_RAM_MB=$((TOTAL_RAM_KB / 1024))
+IB_POOL_MB=$((TOTAL_RAM_MB / 2))
+IB_POOL="${IB_POOL_MB}M"
+
+# InnoDB-Instanzen: 1 pro GB Buffer Pool, max 8
+IB_INSTANCES=$((IB_POOL_MB / 1024))
+[[ $IB_INSTANCES -lt 1 ]] && IB_INSTANCES=1
+[[ $IB_INSTANCES -gt 8 ]] && IB_INSTANCES=8
+
+cat > /etc/mysql/conf.d/wordpress-optimized.cnf <<EOF
+[mysqld]
+# Zeichensatz
+character-set-server  = utf8mb4
+collation-server      = utf8mb4_unicode_ci
+
+# InnoDB — Kernspeicher
+innodb_buffer_pool_size       = ${IB_POOL}
+innodb_buffer_pool_instances  = ${IB_INSTANCES}
+innodb_log_file_size          = 256M
+innodb_flush_log_at_trx_commit = 2
+innodb_flush_method           = O_DIRECT
+innodb_read_io_threads        = 4
+innodb_write_io_threads       = 4
+innodb_file_per_table         = 1
+innodb_stats_on_metadata      = 0
+
+# Verbindungen
+max_connections               = 200
+thread_cache_size             = 20
+table_open_cache              = 4096
+table_definition_cache        = 2048
+
+# Abfragen
+tmp_table_size                = 64M
+max_heap_table_size           = 64M
+join_buffer_size               = 4M
+sort_buffer_size               = 4M
+read_buffer_size               = 2M
+read_rnd_buffer_size           = 2M
+
+# Query Cache deaktiviert (veraltet, schadet mehr als es nützt)
+query_cache_size              = 0
+query_cache_type              = 0
+
+# Slow Query Log
+slow_query_log                = 1
+slow_query_log_file           = /var/log/mysql/slow.log
+long_query_time               = 2
+
+# Netzwerk — lauscht auf allen Interfaces für Remote-Zugriff
+bind-address                  = 0.0.0.0
+EOF
+log "MariaDB konfiguriert (InnoDB Buffer: ${IB_POOL}, ${IB_INSTANCES} Instanz(en))"
+
+# ── MariaDB sichern & Admin-User anlegen ───────────────────────────────────
+systemctl restart mariadb
+
+mysql -e "DELETE FROM mysql.user WHERE User='';"
+mysql -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"
+mysql -e "DROP DATABASE IF EXISTS test;"
+mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
+mysql -e "FLUSH PRIVILEGES;"
+
+ADMIN_USER="wp_admin"
+ADMIN_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32)
+
+# Admin-User für jede Web-VM-IP anlegen
+IFS=',' read -ra VM_IPS <<< "$WEB_VM_IPS"
+for VM_IP in "${VM_IPS[@]}"; do
+    VM_IP=$(echo "$VM_IP" | tr -d ' ')
+    mysql -e "CREATE USER IF NOT EXISTS '${ADMIN_USER}'@'${VM_IP}' IDENTIFIED BY '${ADMIN_PASS}';"
+    mysql -e "GRANT ALL PRIVILEGES ON *.* TO '${ADMIN_USER}'@'${VM_IP}' WITH GRANT OPTION;"
+    log "DB-Admin-User für ${VM_IP} angelegt"
+done
+mysql -e "FLUSH PRIVILEGES;"
+
+# ── UFW ────────────────────────────────────────────────────────────────────
+ufw --force reset
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp
+
+for VM_IP in "${VM_IPS[@]}"; do
+    VM_IP=$(echo "$VM_IP" | tr -d ' ')
+    ufw allow from "$VM_IP" to any port 3306
+    log "UFW: MySQL-Zugriff von ${VM_IP} erlaubt"
+done
+
+ufw --force enable
+log "Firewall konfiguriert"
+
+# ── Services starten ───────────────────────────────────────────────────────
+systemctl enable mariadb
+systemctl restart mariadb
+log "MariaDB gestartet"
+
+# ── Zusammenfassung ────────────────────────────────────────────────────────
+echo ""
+echo -e "${BOLD}╔══════════════════════════════════════════════╗"
+echo -e "║   Setup abgeschlossen ✓                      ║"
+echo -e "╚══════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "  DB-Host-IP:    ${BOLD}$(hostname -I | awk '{print $1}')${NC}"
+echo ""
+echo -e "${BOLD}  Diese Daten bei setup-web.sh eingeben:${NC}"
+echo -e "  DB-Admin-User: ${BOLD}${ADMIN_USER}${NC}"
+echo -e "  DB-Admin-Pass: ${BOLD}${ADMIN_PASS}${NC}"
+echo ""
+echo -e "  InnoDB Buffer: ${BOLD}${IB_POOL}${NC}"
+echo ""
+
+# Zugangsdaten lokal sichern
+mkdir -p /etc/wp-hosting
+cat > /etc/wp-hosting/db-credentials.txt <<EOF
+DB_HOST=$(hostname -I | awk '{print $1}')
+DB_ADMIN_USER=${ADMIN_USER}
+DB_ADMIN_PASS=${ADMIN_PASS}
+EOF
+chmod 600 /etc/wp-hosting/db-credentials.txt
+echo -e "${YELLOW}  → Zugangsdaten gespeichert: /etc/wp-hosting/db-credentials.txt${NC}"
+echo -e "${YELLOW}  → Unbedingt notieren — werden nur einmal angezeigt!${NC}"
+echo ""
