@@ -1,6 +1,6 @@
 # WP Hosting Scripts
 
-Bash-Scripts zur automatisierten Einrichtung von WordPress- und WooCommerce-Hosting auf Ubuntu 24.04 LTS mit Proxmox.
+Bash-Scripts zur vollautomatisierten Einrichtung von WordPress- und WooCommerce-Hosting auf Ubuntu 24.04 LTS mit Proxmox.
 
 ## Architektur
 
@@ -21,86 +21,126 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL)
 
 ## Scripts
 
-| Script | Zweck | Wann ausführen |
-|---|---|---|
-| `setup-db.sh` | Datenbank-VM einrichten | Einmalig auf der DB-VM |
-| `setup-web.sh` | Web-VM einrichten | Einmalig pro Web-VM |
-| `install-wp.sh` | Neue WordPress/WooCommerce-Site anlegen | Für jede neue Site |
+| Script | Ausführen auf | Zweck | Wann |
+|---|---|---|---|
+| `proxmox-create-template.sh` | Proxmox Host | Ubuntu 24.04 Cloud-init Template erstellen | Einmalig |
+| `proxmox-create-vm.sh` | Proxmox Host | VM aus Template klonen & konfigurieren | Pro neue VM |
+| `setup-db.sh` | Datenbank-VM | MariaDB installieren & optimieren | Einmalig pro VM |
+| `setup-web.sh` | Web-VM | Nginx, PHP, Redis, phpMyAdmin, Filebrowser | Einmalig pro VM |
+| `install-wp.sh` | Web-VM | Neue WordPress/WooCommerce-Site anlegen | Pro neue Site |
 
-## Reihenfolge
+---
 
-### 1. Datenbank-VM
+## Komplette Einrichtung — Schritt für Schritt
+
+### Schritt 1: Template erstellen (Proxmox Host, einmalig)
 
 ```bash
+curl -sO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/proxmox-create-template.sh
+bash proxmox-create-template.sh
+```
+
+Erstellt ein Ubuntu 24.04 Cloud-init Template (Standard-ID: 9000).
+
+---
+
+### Schritt 2: VMs anlegen (Proxmox Host, pro VM)
+
+```bash
+curl -sO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/proxmox-create-vm.sh
+bash proxmox-create-vm.sh
+```
+
+Das Script fragt nach VM-Typ, IP, Hostname, Storage — und gibt am Ende den SSH-Befehl für den nächsten Schritt aus.
+
+**Empfohlene Ressourcen pro VM-Typ:**
+
+| VM-Typ | vCPU | RAM | Disk |
+|---|---|---|---|
+| Datenbank | 4 | 8 GB | 50 GB |
+| WordPress | 2 | 4 GB | 30 GB |
+| WooCommerce | 4 | 8 GB | 40 GB |
+
+---
+
+### Schritt 3: Datenbank-VM einrichten
+
+```bash
+ssh ubuntu@<DB-VM-IP>
 curl -sO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/setup-db.sh
 sudo bash setup-db.sh
 ```
 
-Notiere die ausgegebenen DB-Zugangsdaten — werden für `setup-web.sh` benötigt.
+Das Script gibt DB-Admin-Zugangsdaten aus → für Schritt 4 notieren.
 
-### 2. Web-VM(s)
+---
+
+### Schritt 4: Web-VM(s) einrichten
 
 ```bash
+ssh ubuntu@<WEB-VM-IP>
 curl -sO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/setup-web.sh
 sudo bash setup-web.sh
 ```
 
-Das Script fragt nach:
-- VM-Typ: WordPress oder WooCommerce
-- IP der Datenbank-VM
-- DB-Admin-Zugangsdaten (von Schritt 1)
-- Standard-Admin-E-Mail für WordPress-Sites
-- IP des Nginx Proxy Managers
+Fragt nach VM-Typ (WP/WooCommerce), DB-VM-IP und DB-Zugangsdaten aus Schritt 3.
 
-### 3. Neue WordPress-Site anlegen
+---
+
+### Schritt 5: Neue WordPress-Site anlegen
 
 ```bash
 curl -sO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/install-wp.sh
 sudo bash install-wp.sh
 ```
 
-Das Script fragt nach:
-- Domain (z.B. `meinshop.de`)
-- Typ: WordPress oder WooCommerce
+Fragt nach Domain und Typ (WordPress oder WooCommerce). Läuft für **jede neue Site** erneut.
 
-Danach NPM Proxy-Host für die Domain anlegen (HTTP → Web-VM:80).
+Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 
 ---
 
 ## Was wird installiert
 
 ### Web-VM
-- Nginx (optimiert, FastCGI-Cache auf WooCommerce-VMs)
-- PHP 8.3-FPM (eigener Pool pro Site)
-- Redis (Object Cache)
+- Nginx (FastCGI-Cache auf WooCommerce-VMs, Rate-Limit für wp-login)
+- PHP 8.3-FPM (eigener Pool pro Site, static/dynamic je nach Typ)
+- Redis Object Cache (512 MB WooCommerce / 256 MB WordPress)
 - WP-CLI
-- phpMyAdmin (Port 8080)
-- Filebrowser (Port 8090)
+- phpMyAdmin auf Port 8080 (verbunden mit Datenbank-VM)
+- Filebrowser auf Port 8090 (Zugriff auf alle Sites unter /var/www)
 - Fail2ban, UFW
 
 ### Datenbank-VM
-- MariaDB (InnoDB-Buffer dynamisch an RAM angepasst)
-- Zugriff nur von Web-VM-IPs
+- MariaDB (InnoDB Buffer dynamisch: 50 % des verfügbaren RAM)
+- Remote-Zugriff nur von Web-VM-IPs
+- Slow Query Log aktiviert
 
-### Pro Site
+### Pro Site (install-wp.sh)
 - Nginx-Vhost
-- PHP-FPM-Pool (WooCommerce: static, WordPress: dynamic)
-- MariaDB-Datenbank + eigener User
+- PHP-FPM-Pool mit automatisch berechnetem Worker-Count
+- MariaDB-Datenbank + eigener User (32-stelliges Passwort)
 - WordPress auf Deutsch
 - Redis Object Cache Plugin
-- WooCommerce + Nginx Helper (bei WooCommerce-Typ)
+- WooCommerce + Nginx Helper bei WooCommerce-Sites
 - Zufälliger Admin-User (14 Zeichen) + Passwort (28 Zeichen)
+- Zugangsdaten gespeichert unter `/etc/wp-hosting/sites/<domain>.txt`
+
+---
 
 ## Zugangsdaten
 
-Zugangsdaten jeder Site werden gespeichert unter:
-```
-/etc/wp-hosting/sites/<domain>.txt
-```
+| Datei | Inhalt |
+|---|---|
+| `/etc/wp-hosting/config` | DB-Host, Admin-Credentials (Web-VM) |
+| `/etc/wp-hosting/db-credentials.txt` | DB-Admin-Zugangsdaten (DB-VM) |
+| `/etc/wp-hosting/sites/<domain>.txt` | WP-Admin + DB-Daten pro Site |
+
+---
 
 ## Voraussetzungen
 
-- Ubuntu 24.04 LTS auf allen VMs
+- Proxmox VE (getestet mit 8.x)
 - Nginx Proxy Manager läuft bereits (für SSL-Terminierung)
-- Cloudflare (empfohlen, für DNS + DDoS-Schutz)
-- VMs können sich gegenseitig via IP erreichen
+- Cloudflare (empfohlen)
+- VMs können sich gegenseitig per IP erreichen
