@@ -29,6 +29,10 @@ if qm status "$TEMPLATE_ID" &>/dev/null; then
     err "VM-ID ${TEMPLATE_ID} existiert bereits. Andere ID wählen oder bestehende VM löschen."
 fi
 
+read -rp "vCPU Anzahl [Standard: 2]: " TEMPLATE_CORES
+TEMPLATE_CORES=${TEMPLATE_CORES:-2}
+[[ ! "$TEMPLATE_CORES" =~ ^[0-9]+$ ]] && err "Ungültige CPU-Anzahl."
+
 read -rp "RAM in MB [Standard: 2048]: " TEMPLATE_RAM
 TEMPLATE_RAM=${TEMPLATE_RAM:-2048}
 [[ ! "$TEMPLATE_RAM" =~ ^[0-9]+$ ]] && err "Ungültiger RAM-Wert."
@@ -58,6 +62,7 @@ ROOT_SSH_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9!@#%^&*' | head -c 24)
 
 echo ""
 info "Template-ID: ${BOLD}${TEMPLATE_ID}${NC}"
+info "vCPU:        ${BOLD}${TEMPLATE_CORES}${NC}"
 info "RAM:         ${BOLD}${TEMPLATE_RAM} MB${NC}"
 info "Disk:        ${BOLD}${TEMPLATE_DISK} GB${NC}"
 info "MAC:         ${BOLD}${TEMPLATE_MAC:-automatisch}${NC}"
@@ -89,7 +94,7 @@ NET0_CONFIG="virtio,bridge=${BRIDGE}"
 qm create "$TEMPLATE_ID" \
     --name "ubuntu-2404-template" \
     --memory "$TEMPLATE_RAM" \
-    --cores 2 \
+    --cores "$TEMPLATE_CORES" \
     --net0 "$NET0_CONFIG" \
     --ostype l26 \
     --machine q35 \
@@ -155,6 +160,7 @@ echo -e "║   Template fertig ✓                          ║"
 echo -e "╚══════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  Template-ID:     ${BOLD}${TEMPLATE_ID}${NC}"
+echo -e "  vCPU:            ${BOLD}${TEMPLATE_CORES}${NC}"
 echo -e "  RAM:             ${BOLD}${TEMPLATE_RAM} MB${NC}"
 echo -e "  Disk:            ${BOLD}${TEMPLATE_DISK} GB${NC}"
 echo -e "  MAC:             ${BOLD}${TEMPLATE_MAC:-automatisch}${NC}"
