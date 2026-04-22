@@ -33,8 +33,30 @@ info "System wird aktualisiert..."
 apt-get update -q
 DEBIAN_FRONTEND=noninteractive apt-get upgrade -yq
 DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
-    curl wget ufw ca-certificates mariadb-server
+    curl wget ufw ca-certificates mariadb-server \
+    unattended-upgrades apt-listchanges
 log "Pakete installiert"
+
+# ── Automatische Sicherheitsupdates ───────────────────────────────────────
+cat > /etc/apt/apt.conf.d/50unattended-upgrades-wp <<'EOF'
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+};
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+Unattended-Upgrade::MinimalSteps "true";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "false";
+EOF
+cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+log "Automatische Sicherheitsupdates konfiguriert"
 
 # ── Swap ──────────────────────────────────────────────────────────────────
 if [[ ! -f /swapfile ]]; then
@@ -180,6 +202,32 @@ wget -qO /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh
 bash /tmp/netdata-kickstart.sh --non-interactive --stable-channel --disable-telemetry 2>&1 | tail -5
 rm -f /tmp/netdata-kickstart.sh
 log "Netdata installiert (Port 19999)"
+
+# ── MariaDB Backup-Cron ────────────────────────────────────────────────────
+mkdir -p /var/backups/mysql
+cat > /usr/local/bin/mysql-backup.sh <<'BEOF'
+#!/bin/bash
+BACKUP_DIR="/var/backups/mysql"
+DATE=$(date +%Y%m%d_%H%M)
+KEEP_DAYS=7
+LOG="/var/log/mysql-backup.log"
+
+echo "[$(date '+%Y-%m-%d %H:%M')] Backup gestartet" >> "$LOG"
+mysqldump --all-databases --single-transaction --quick --lock-tables=false \
+    | gzip > "${BACKUP_DIR}/all-databases_${DATE}.sql.gz"
+
+if [[ $? -eq 0 ]]; then
+    SIZE=$(du -sh "${BACKUP_DIR}/all-databases_${DATE}.sql.gz" | cut -f1)
+    echo "[$(date '+%Y-%m-%d %H:%M')] Backup OK — ${SIZE}" >> "$LOG"
+else
+    echo "[$(date '+%Y-%m-%d %H:%M')] FEHLER beim Backup!" >> "$LOG"
+fi
+
+find "$BACKUP_DIR" -name "*.sql.gz" -mtime +${KEEP_DAYS} -delete
+BEOF
+chmod +x /usr/local/bin/mysql-backup.sh
+echo "0 2 * * * root /usr/local/bin/mysql-backup.sh" > /etc/cron.d/mysql-backup
+log "MariaDB Backup-Cron konfiguriert (täglich 02:00 → /var/backups/mysql, 7 Tage)"
 
 # ── Services starten ───────────────────────────────────────────────────────
 systemctl enable mariadb

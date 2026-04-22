@@ -64,11 +64,33 @@ DEBIAN_FRONTEND=noninteractive apt-get upgrade -yq
 DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
     curl wget unzip git ca-certificates gnupg \
     fail2ban ufw mysql-client \
-    nginx \
+    unattended-upgrades apt-listchanges \
+    nginx redis-server \
     php8.3-fpm php8.3-mysql php8.3-redis php8.3-curl php8.3-gd \
     php8.3-mbstring php8.3-xml php8.3-zip php8.3-intl \
     php8.3-soap php8.3-bcmath php8.3-imagick php8.3-opcache
 log "Pakete installiert"
+
+# ── Automatische Sicherheitsupdates ───────────────────────────────────────
+cat > /etc/apt/apt.conf.d/50unattended-upgrades-wp <<'EOF'
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+};
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+Unattended-Upgrade::MinimalSteps "true";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "false";
+EOF
+cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+log "Automatische Sicherheitsupdates konfiguriert"
 
 # ── Swap ──────────────────────────────────────────────────────────────────
 if [[ ! -f /swapfile ]]; then
@@ -132,7 +154,6 @@ EOF
 log "PHP 8.3 konfiguriert (${MEM_LIMIT} RAM, OPcache ${OPCACHE_MEM}MB)"
 
 # ── Redis konfigurieren ───────────────────────────────────────────────────
-apt-get install -yq redis-server
 REDIS_MEM=$( [[ "$VM_TYPE" == "woocommerce" ]] && echo "512mb" || echo "256mb" )
 
 sed -i "s/^# maxmemory .*/maxmemory ${REDIS_MEM}/" /etc/redis/redis.conf

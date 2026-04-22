@@ -44,8 +44,12 @@ case "$site_choice" in
 esac
 
 echo ""
+read -rp "WP-Admin-Zugang auf bestimmte IP beschränken? (leer = kein Limit): " ADMIN_IP
+
+echo ""
 info "Domain:    ${BOLD}${DOMAIN}${NC}"
 info "Typ:       ${BOLD}${SITE_TYPE}${NC}"
+[[ -n "$ADMIN_IP" ]] && info "Admin-IP:  ${BOLD}${ADMIN_IP}${NC}"
 echo ""
 read -rp "Installation starten? [j/N]: " confirm
 [[ "$confirm" != "j" && "$confirm" != "J" ]] && err "Abgebrochen."
@@ -215,8 +219,28 @@ server {
     }
 
     location ~ /\.(ht|git|env) { deny all; }
-    location = /wp-login.php   { limit_req zone=login burst=3 nodelay; include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
     location = /xmlrpc.php     { deny all; }
+
+$(if [[ -n "$ADMIN_IP" ]]; then
+cat <<IPEOF
+    location /wp-admin/ {
+        allow ${ADMIN_IP};
+        deny all;
+    }
+    location = /wp-login.php {
+        allow ${ADMIN_IP};
+        deny all;
+        limit_req zone=login burst=3 nodelay;
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:${SOCK};
+        include fastcgi_params;
+    }
+IPEOF
+else
+cat <<NOIPEOF
+    location = /wp-login.php { limit_req zone=login burst=3 nodelay; include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
+NOIPEOF
+fi)
 }
 EOF
 else
@@ -253,8 +277,28 @@ server {
     }
 
     location ~ /\.(ht|git|env) { deny all; }
-    location = /wp-login.php   { include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
     location = /xmlrpc.php     { deny all; }
+
+$(if [[ -n "$ADMIN_IP" ]]; then
+cat <<IPEOF
+    location /wp-admin/ {
+        allow ${ADMIN_IP};
+        deny all;
+    }
+    location = /wp-login.php {
+        allow ${ADMIN_IP};
+        deny all;
+        limit_req zone=login burst=3 nodelay;
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:${SOCK};
+        include fastcgi_params;
+    }
+IPEOF
+else
+cat <<NOIPEOF
+    location = /wp-login.php { include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
+NOIPEOF
+fi)
 }
 EOF
 fi
@@ -291,7 +335,7 @@ sudo -u "$SYSTEM_USER" wp config create \
     --extra-php="define('WP_REDIS_HOST', '127.0.0.1');
 define('WP_REDIS_PORT', 6379);
 define('WP_CACHE_KEY_SALT', '${DOMAIN}:');
-define('DISABLE_WP_CRON', false);
+define('DISABLE_WP_CRON', true);
 define('WP_POST_REVISIONS', 5);
 define('EMPTY_TRASH_DAYS', 7);" \
     --allow-root
@@ -331,6 +375,13 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     log "WooCommerce installiert"
 fi
 
+# ── WP-Cron via System-Cron ───────────────────────────────────────────────
+# DISABLE_WP_CRON=true → kein Cron-Aufruf bei jedem Seitenaufruf
+echo "*/5 * * * * ${SYSTEM_USER} /usr/local/bin/wp --path=${SITE_PATH} cron event run --due-now --allow-root 2>/dev/null" \
+    > "/etc/cron.d/wpcron-${DOMAIN_SAFE}"
+chmod 644 "/etc/cron.d/wpcron-${DOMAIN_SAFE}"
+log "WP-Cron via System-Cron (alle 5 Minuten)"
+
 # ── Berechtigungen setzen ─────────────────────────────────────────────────
 chown -R "${SYSTEM_USER}:www-data" "$SITE_PATH"
 find "$SITE_PATH" -type d -exec chmod 750 {} \;
@@ -367,6 +418,7 @@ Site-Pfad:     ${SITE_PATH}
 PHP-Pool:      ${PHP_POOL}
 Nginx-Vhost:   ${NGINX_VHOST}
 System-User:   ${SYSTEM_USER}
+Admin-IP:      ${ADMIN_IP:-unbeschränkt}
 EOF
 chmod 600 "$CRED_FILE"
 

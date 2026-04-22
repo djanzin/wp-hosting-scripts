@@ -31,6 +31,9 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL)
 | `delete-wp.sh` | Web-VM | Site vollständig entfernen | Bei Bedarf |
 | `update-wp.sh` | Web-VM | WordPress Core, Plugins, Themes aktualisieren | Regelmäßig |
 | `list-sites.sh` | Web-VM | Alle Sites mit Status anzeigen | Bei Bedarf |
+| `clone-site.sh` | Web-VM | Bestehende Site auf neue Domain klonen (Staging) | Bei Bedarf |
+| `migrate-wp.sh` | Web-VM | Externe Site per SSH oder Datei-Upload migrieren | Bei Bedarf |
+| `db-backup.sh` | Datenbank-VM | Manueller MariaDB-Dump (läuft auch automatisch) | Bei Bedarf |
 
 ---
 
@@ -114,6 +117,15 @@ sudo bash update-wp.sh
 
 # Site vollständig entfernen
 sudo bash delete-wp.sh
+
+# Bestehende Site auf neue Domain klonen (z.B. Staging)
+sudo bash clone-site.sh
+
+# Externe WordPress-Site migrieren (SSH oder lokale Dateien)
+sudo bash migrate-wp.sh
+
+# Manueller Datenbank-Dump (DB-VM)
+sudo bash db-backup.sh
 ```
 
 ---
@@ -132,23 +144,27 @@ sudo bash delete-wp.sh
 - Log-Rotation (14 Tage, täglich komprimiert)
 - Fail2ban, UFW
 - SSH-Hardening (Root-Login deaktiviert, optional Key-only Auth)
+- Automatische Sicherheitsupdates (unattended-upgrades)
 
 ### Datenbank-VM
 - MariaDB (InnoDB Buffer dynamisch: 50 % des verfügbaren RAM)
+- Automatische Backups täglich 02:00 → /var/backups/mysql (7 Tage)
 - Remote-Zugriff nur von Web-VM-IPs
 - Slow Query Log aktiviert
+- Automatische Sicherheitsupdates (unattended-upgrades)
 - Netdata Monitoring auf Port 19999
 - Swap (dynamisch berechnet)
-- SSH-Hardening
+- SSH-Hardening (Root-Login deaktiviert, optional Key-only Auth)
 
 ### Pro Site (install-wp.sh)
-- Nginx-Vhost
+- Nginx-Vhost (optional: wp-admin auf bestimmte IP beschränken)
 - PHP-FPM-Pool mit automatisch berechnetem Worker-Count
 - MariaDB-Datenbank + eigener User (32-stelliges Passwort)
 - WordPress auf Deutsch
 - Redis Object Cache Plugin
 - WooCommerce + Nginx Helper bei WooCommerce-Sites
 - Zufälliger Admin-User (14 Zeichen) + Passwort (28 Zeichen)
+- System-Cron für WP-Cron (alle 5 Minuten, kein Performance-Overhead)
 - Zugangsdaten gespeichert unter `/etc/wp-hosting/sites/<domain>.txt`
 
 ---

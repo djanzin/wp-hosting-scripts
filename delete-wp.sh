@@ -96,6 +96,10 @@ if id "$SYSTEM_USER" &>/dev/null; then
     log "Systemuser entfernt: ${SYSTEM_USER}"
 fi
 
+# ── WP-Cron-Job ───────────────────────────────────────────────────────────
+rm -f "/etc/cron.d/wpcron-${DOMAIN_SAFE}"
+log "WP-Cron-Job entfernt"
+
 # ── PHP Log-Datei ─────────────────────────────────────────────────────────
 rm -f "/var/log/php/${DOMAIN}.error.log"
 

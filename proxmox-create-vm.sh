@@ -132,6 +132,9 @@ if [[ -n "$SSH_KEY" ]]; then
     log "SSH Key hinterlegt"
 fi
 
+# Auto-Start nach Proxmox-Neustart
+qm set "$VM_ID" --onboot 1
+
 # Tags für Übersicht in Proxmox UI
 qm set "$VM_ID" --tags "$VM_TYPE,wordpress-hosting"
 
