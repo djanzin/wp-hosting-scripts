@@ -143,6 +143,12 @@ if [[ -d /var/cache/nginx/wp ]]; then
     log "FastCGI-Cache geleert"
 fi
 
+# ── OPcache leeren ────────────────────────────────────────────────────────
+# PHP-FPM neu laden → alle kompilierten Bytecode-Dateien verworfen
+# Verhindert, dass veraltete OPcache-Einträge nach Core-Updates aktiv bleiben
+systemctl reload php8.3-fpm
+log "OPcache geleert (PHP-FPM neu geladen)"
+
 # ── Webhook-Benachrichtigung ──────────────────────────────────────────────
 WEBHOOK_URL="${WEBHOOK_URL:-}"
 [[ -f /etc/wp-hosting/config ]] && source /etc/wp-hosting/config 2>/dev/null || true

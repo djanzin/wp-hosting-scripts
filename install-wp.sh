@@ -343,7 +343,8 @@ define('WP_REDIS_PORT', 6379);
 define('WP_CACHE_KEY_SALT', '${DOMAIN}:');
 define('DISABLE_WP_CRON', true);
 define('WP_POST_REVISIONS', 5);
-define('EMPTY_TRASH_DAYS', 7);" \
+define('EMPTY_TRASH_DAYS', 7);
+define('DISALLOW_FILE_EDIT', true);" \
     --allow-root
 
 sudo -u "$SYSTEM_USER" wp core install \

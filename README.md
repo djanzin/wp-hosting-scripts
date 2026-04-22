@@ -36,6 +36,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL)
 | `reset-wp-admin.sh` | Web-VM | WordPress-Admin-Passwort zurücksetzen | Bei Bedarf |
 | `db-backup.sh` | Datenbank-VM | Manueller MariaDB-Dump (läuft auch automatisch) | Bei Bedarf |
 | `rotate-keys.sh` | Web-VM | WordPress Security Keys & Salts rotieren (zwingt Re-Login) | Alle 3-6 Monate |
+| `health-check.sh` | Web-VM | HTTP-Status, PHP-FPM Socket und DB-Verbindung aller Sites prüfen | Bei Bedarf / Cron |
 
 ---
 
@@ -134,6 +135,12 @@ Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 
 # Security Keys rotieren (alle User werden ausgeloggt)
 ./rotate-keys.sh
+
+# Health Check (HTTP, PHP-FPM, DB aller Sites)
+./health-check.sh
+
+# Health Check mit Webhook-Benachrichtigung (auch bei OK-Status)
+./health-check.sh --notify
 ```
 
 ---
@@ -170,6 +177,7 @@ Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 ### Pro Site (install-wp.sh)
 - Nginx-Vhost (optional: wp-admin auf bestimmte IP beschränken)
 - PHP-FPM-Pool mit automatisch berechnetem Worker-Count (Slow Log ab 5s)
+- `DISALLOW_FILE_EDIT` — Theme/Plugin-Editor im WP-Dashboard deaktiviert
 - MariaDB-Datenbank + eigener User (32-stelliges Passwort)
 - WordPress auf Deutsch
 - Redis Object Cache Plugin
