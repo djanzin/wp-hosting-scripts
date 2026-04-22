@@ -121,6 +121,9 @@ php_admin_value[max_input_time]       = 300
 php_admin_value[max_input_vars]       = 10000
 php_admin_value[error_log]            = /var/log/php/${DOMAIN}.error.log
 php_admin_flag[log_errors]            = on
+
+slowlog                               = /var/log/php/${DOMAIN}.slow.log
+request_slowlog_timeout               = 5s
 EOF
 else
     # WordPress: dynamic — spart RAM bei wenig Traffic
@@ -156,6 +159,9 @@ php_admin_value[max_input_time]       = 60
 php_admin_value[max_input_vars]       = 5000
 php_admin_value[error_log]            = /var/log/php/${DOMAIN}.error.log
 php_admin_flag[log_errors]            = on
+
+slowlog                               = /var/log/php/${DOMAIN}.slow.log
+request_slowlog_timeout               = 5s
 EOF
 fi
 

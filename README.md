@@ -35,6 +35,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL)
 | `migrate-wp.sh` | Web-VM | Externe Site per SSH oder Datei-Upload migrieren | Bei Bedarf |
 | `reset-wp-admin.sh` | Web-VM | WordPress-Admin-Passwort zurücksetzen | Bei Bedarf |
 | `db-backup.sh` | Datenbank-VM | Manueller MariaDB-Dump (läuft auch automatisch) | Bei Bedarf |
+| `rotate-keys.sh` | Web-VM | WordPress Security Keys & Salts rotieren (zwingt Re-Login) | Alle 3-6 Monate |
 
 ---
 
@@ -130,6 +131,9 @@ Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 
 # Manueller Datenbank-Dump (DB-VM)
 ./db-backup.sh
+
+# Security Keys rotieren (alle User werden ausgeloggt)
+./rotate-keys.sh
 ```
 
 ---
@@ -165,7 +169,7 @@ Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 
 ### Pro Site (install-wp.sh)
 - Nginx-Vhost (optional: wp-admin auf bestimmte IP beschränken)
-- PHP-FPM-Pool mit automatisch berechnetem Worker-Count
+- PHP-FPM-Pool mit automatisch berechnetem Worker-Count (Slow Log ab 5s)
 - MariaDB-Datenbank + eigener User (32-stelliges Passwort)
 - WordPress auf Deutsch
 - Redis Object Cache Plugin
