@@ -23,6 +23,46 @@ read -rp "IPs der Web-VMs, kommagetrennt (z.B. 192.168.1.10,192.168.1.11): " WEB
 [[ -z "$WEB_VM_IPS" ]] && err "Mindestens eine Web-VM-IP angeben."
 
 echo ""
+echo "Remote-Backup für MariaDB-Dumps konfigurieren?"
+echo "  1) Cloudflare R2"
+echo "  2) S3-kompatibel (AWS, MinIO, etc.)"
+echo "  3) SFTP"
+echo "  4) Überspringen (nur lokale Backups)"
+echo ""
+read -rp "Auswahl [1-4]: " RCLONE_CHOICE
+
+RCLONE_REMOTE=""
+case "$RCLONE_CHOICE" in
+    1)
+        read -rp "R2 Account-ID: " R2_ACCOUNT_ID
+        read -rp "R2 Access Key ID: " R2_KEY_ID
+        read -rsp "R2 Access Key Secret: " R2_KEY_SECRET; echo ""
+        read -rp "R2 Bucket-Name: " R2_BUCKET
+        RCLONE_REMOTE="r2"
+        RCLONE_DEST="r2:${R2_BUCKET}/mysql-backups"
+        ;;
+    2)
+        read -rp "S3 Region (z.B. eu-central-1): " S3_REGION
+        read -rp "S3 Bucket-Name: " S3_BUCKET
+        read -rp "S3 Access Key ID: " S3_KEY_ID
+        read -rsp "S3 Access Key Secret: " S3_KEY_SECRET; echo ""
+        read -rp "S3 Endpoint (leer = AWS Standard): " S3_ENDPOINT
+        RCLONE_REMOTE="s3backup"
+        RCLONE_DEST="s3backup:${S3_BUCKET}/mysql-backups"
+        ;;
+    3)
+        read -rp "SFTP Host: " SFTP_HOST
+        read -rp "SFTP User: " SFTP_USER
+        read -rp "SFTP Pfad (z.B. /backups/mysql): " SFTP_PATH
+        read -rp "SFTP Port [22]: " SFTP_PORT; SFTP_PORT=${SFTP_PORT:-22}
+        RCLONE_REMOTE="sftpbackup"
+        RCLONE_DEST="sftpbackup:${SFTP_PATH}"
+        ;;
+    4) RCLONE_REMOTE="" ;;
+    *) warn "Ungültige Auswahl — Remote-Backup übersprungen"; RCLONE_REMOTE="" ;;
+esac
+
+echo ""
 info "Datenbank-VM wird für ${BOLD}WordPress & WooCommerce${NC} optimiert"
 echo ""
 read -rp "Einrichtung starten? [j/N]: " confirm
@@ -36,6 +76,52 @@ DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
     curl wget ufw ca-certificates mariadb-server \
     unattended-upgrades apt-listchanges
 log "Pakete installiert"
+
+# ── rclone installieren ───────────────────────────────────────────────────
+if [[ -n "$RCLONE_REMOTE" ]]; then
+    curl -fsS https://rclone.org/install.sh | bash 2>&1 | tail -3
+    log "rclone installiert"
+
+    mkdir -p /root/.config/rclone
+    case "$RCLONE_CHOICE" in
+        1) cat >> /root/.config/rclone/rclone.conf <<EOF
+
+[r2]
+type = s3
+provider = Cloudflare
+access_key_id = ${R2_KEY_ID}
+secret_access_key = ${R2_KEY_SECRET}
+endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+acl = private
+EOF
+            ;;
+        2) cat >> /root/.config/rclone/rclone.conf <<EOF
+
+[s3backup]
+type = s3
+provider = AWS
+access_key_id = ${S3_KEY_ID}
+secret_access_key = ${S3_KEY_SECRET}
+region = ${S3_REGION}
+${S3_ENDPOINT:+endpoint = ${S3_ENDPOINT}}
+acl = private
+EOF
+            ;;
+        3) cat >> /root/.config/rclone/rclone.conf <<EOF
+
+[sftpbackup]
+type = sftp
+host = ${SFTP_HOST}
+user = ${SFTP_USER}
+port = ${SFTP_PORT}
+key_file = /root/.ssh/id_rsa
+EOF
+            warn "SFTP: SSH-Key /root/.ssh/id_rsa muss manuell auf Ziel-Server hinterlegt werden."
+            ;;
+    esac
+    chmod 600 /root/.config/rclone/rclone.conf
+    log "rclone konfiguriert (Remote: ${RCLONE_REMOTE})"
+fi
 
 # ── Automatische Sicherheitsupdates ───────────────────────────────────────
 cat > /etc/apt/apt.conf.d/50unattended-upgrades-wp <<'EOF'
@@ -205,25 +291,38 @@ log "Netdata installiert (Port 19999)"
 
 # ── MariaDB Backup-Cron ────────────────────────────────────────────────────
 mkdir -p /var/backups/mysql
-cat > /usr/local/bin/mysql-backup.sh <<'BEOF'
+RCLONE_DEST_CFG="${RCLONE_DEST:-}"
+cat > /usr/local/bin/mysql-backup.sh <<BEOF
 #!/bin/bash
 BACKUP_DIR="/var/backups/mysql"
-DATE=$(date +%Y%m%d_%H%M)
+DATE=\$(date +%Y%m%d_%H%M)
 KEEP_DAYS=7
 LOG="/var/log/mysql-backup.log"
+OUTFILE="\${BACKUP_DIR}/all-databases_\${DATE}.sql.gz"
+RCLONE_DEST="${RCLONE_DEST_CFG}"
 
-echo "[$(date '+%Y-%m-%d %H:%M')] Backup gestartet" >> "$LOG"
+echo "[\$(date '+%Y-%m-%d %H:%M')] Backup gestartet" >> "\$LOG"
 mysqldump --all-databases --single-transaction --quick --lock-tables=false \
-    | gzip > "${BACKUP_DIR}/all-databases_${DATE}.sql.gz"
+    | gzip > "\$OUTFILE"
 
-if [[ $? -eq 0 ]]; then
-    SIZE=$(du -sh "${BACKUP_DIR}/all-databases_${DATE}.sql.gz" | cut -f1)
-    echo "[$(date '+%Y-%m-%d %H:%M')] Backup OK — ${SIZE}" >> "$LOG"
+if [[ \$? -eq 0 ]]; then
+    SIZE=\$(du -sh "\$OUTFILE" | cut -f1)
+    echo "[\$(date '+%Y-%m-%d %H:%M')] Lokal OK — \${SIZE}" >> "\$LOG"
+
+    # Remote-Upload via rclone
+    if [[ -n "\$RCLONE_DEST" ]] && command -v rclone &>/dev/null; then
+        rclone copy "\$OUTFILE" "\$RCLONE_DEST" 2>> "\$LOG"
+        if [[ \$? -eq 0 ]]; then
+            echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Upload OK → \${RCLONE_DEST}" >> "\$LOG"
+        else
+            echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Upload FEHLER!" >> "\$LOG"
+        fi
+    fi
 else
-    echo "[$(date '+%Y-%m-%d %H:%M')] FEHLER beim Backup!" >> "$LOG"
+    echo "[\$(date '+%Y-%m-%d %H:%M')] FEHLER beim Backup!" >> "\$LOG"
 fi
 
-find "$BACKUP_DIR" -name "*.sql.gz" -mtime +${KEEP_DAYS} -delete
+find "\$BACKUP_DIR" -name "*.sql.gz" -mtime +\${KEEP_DAYS} -delete
 BEOF
 chmod +x /usr/local/bin/mysql-backup.sh
 echo "0 2 * * * root /usr/local/bin/mysql-backup.sh" > /etc/cron.d/mysql-backup

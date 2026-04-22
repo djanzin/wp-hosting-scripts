@@ -33,6 +33,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL)
 | `list-sites.sh` | Web-VM | Alle Sites mit Status anzeigen | Bei Bedarf |
 | `clone-site.sh` | Web-VM | Bestehende Site auf neue Domain klonen (Staging) | Bei Bedarf |
 | `migrate-wp.sh` | Web-VM | Externe Site per SSH oder Datei-Upload migrieren | Bei Bedarf |
+| `reset-wp-admin.sh` | Web-VM | WordPress-Admin-Passwort zurücksetzen | Bei Bedarf |
 | `db-backup.sh` | Datenbank-VM | Manueller MariaDB-Dump (läuft auch automatisch) | Bei Bedarf |
 
 ---
@@ -110,22 +111,25 @@ Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 
 ```bash
 # Übersicht aller Sites mit Status
-sudo bash list-sites.sh
+./list-sites.sh
 
 # Alle Sites aktualisieren (Core + Plugins + Themes)
-sudo bash update-wp.sh
+./update-wp.sh
 
 # Site vollständig entfernen
-sudo bash delete-wp.sh
+./delete-wp.sh
+
+# Admin-Passwort zurücksetzen
+./reset-wp-admin.sh
 
 # Bestehende Site auf neue Domain klonen (z.B. Staging)
-sudo bash clone-site.sh
+./clone-site.sh
 
 # Externe WordPress-Site migrieren (SSH oder lokale Dateien)
-sudo bash migrate-wp.sh
+./migrate-wp.sh
 
 # Manueller Datenbank-Dump (DB-VM)
-sudo bash db-backup.sh
+./db-backup.sh
 ```
 
 ---
@@ -137,14 +141,16 @@ sudo bash db-backup.sh
 - PHP 8.3-FPM (eigener Pool pro Site, static/dynamic je nach Typ)
 - Redis Object Cache (512 MB WooCommerce / 256 MB WordPress)
 - WP-CLI
-- phpMyAdmin auf Port 8080 (verbunden mit Datenbank-VM)
-- Filebrowser auf Port 8090 (Zugriff auf alle Sites unter /var/www)
+- phpMyAdmin auf Port 8080 — nur von NPM-IP erreichbar
+- Filebrowser auf Port 8090 — nur von NPM-IP erreichbar
 - Netdata Monitoring auf Port 19999
 - Swap (dynamisch berechnet, swappiness=10)
 - Log-Rotation (14 Tage, täglich komprimiert)
 - Fail2ban, UFW
 - SSH-Hardening (Root-Login deaktiviert, optional Key-only Auth)
 - Automatische Sicherheitsupdates (unattended-upgrades)
+- Optionaler Auto-Update-Cron (sonntags 03:00)
+- Webhook-Benachrichtigungen bei Updates
 
 ### Datenbank-VM
 - MariaDB (InnoDB Buffer dynamisch: 50 % des verfügbaren RAM)
@@ -152,6 +158,7 @@ sudo bash db-backup.sh
 - Remote-Zugriff nur von Web-VM-IPs
 - Slow Query Log aktiviert
 - Automatische Sicherheitsupdates (unattended-upgrades)
+- Automatische Backups täglich 02:00 + optionaler Remote-Upload (R2/S3/SFTP via rclone)
 - Netdata Monitoring auf Port 19999
 - Swap (dynamisch berechnet)
 - SSH-Hardening (Root-Login deaktiviert, optional Key-only Auth)

@@ -143,6 +143,18 @@ if [[ -d /var/cache/nginx/wp ]]; then
     log "FastCGI-Cache geleert"
 fi
 
+# ── Webhook-Benachrichtigung ──────────────────────────────────────────────
+WEBHOOK_URL="${WEBHOOK_URL:-}"
+[[ -f /etc/wp-hosting/config ]] && source /etc/wp-hosting/config 2>/dev/null || true
+
+if [[ -n "${WEBHOOK_URL:-}" ]]; then
+    MSG="${#UPDATED[@]} Site(s) aktualisiert"
+    [[ ${#FAILED[@]} -gt 0 ]] && MSG="${MSG}, ${#FAILED[@]} Fehler: ${FAILED[*]}"
+    STATUS=$( [[ ${#FAILED[@]} -eq 0 ]] && echo "up" || echo "down" )
+    curl -fsS "${WEBHOOK_URL}?status=${STATUS}&msg=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$MSG" 2>/dev/null || echo "$MSG")" \
+        -o /dev/null 2>/dev/null && log "Webhook-Benachrichtigung gesendet" || warn "Webhook fehlgeschlagen"
+fi
+
 # ── Zusammenfassung ───────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════════╗"

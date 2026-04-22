@@ -50,6 +50,8 @@ read -rp "Standard-Admin-E-Mail für WordPress-Sites: " WP_ADMIN_EMAIL
 read -rp "IP-Adresse des Nginx Proxy Managers (für Real-IP): " NPM_IP
 [[ -z "$NPM_IP" ]] && NPM_IP="127.0.0.1"
 
+read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
+
 echo ""
 info "VM-Typ: ${BOLD}${VM_TYPE}${NC}"
 info "DB-Host: ${BOLD}${DB_HOST}${NC}"
@@ -412,12 +414,12 @@ ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp
 ufw allow 80/tcp
-ufw allow 8080/tcp
-ufw allow 8080/tcp
-ufw allow 8090/tcp
+# phpMyAdmin + Filebrowser nur vom NPM erreichbar
+ufw allow from "$NPM_IP" to any port 8080
+ufw allow from "$NPM_IP" to any port 8090
 ufw allow 19999/tcp
 ufw --force enable
-log "Firewall konfiguriert (22, 80, 8080, 8090, 19999)"
+log "Firewall konfiguriert (22, 80 offen | 8080+8090 nur von NPM: ${NPM_IP} | 19999)"
 
 # ── Verzeichnisstruktur ───────────────────────────────────────────────────
 mkdir -p /var/www
@@ -432,6 +434,61 @@ else
     warn "Datenbankverbindung fehlgeschlagen — bitte nach dem Setup prüfen"
 fi
 
+# ── Wöchentlicher Auto-Update Cron ────────────────────────────────────────
+echo ""
+read -rp "Wöchentliche automatische WordPress-Updates aktivieren? (sonntags 03:00) [j/N]: " AUTO_UPDATE
+if [[ "$AUTO_UPDATE" == "j" || "$AUTO_UPDATE" == "J" ]]; then
+    cat > /usr/local/bin/wp-auto-update.sh <<'AUEOF'
+#!/bin/bash
+# Wöchentlicher automatischer WordPress-Update (alle Sites, kein Interaktion)
+source /etc/wp-hosting/config 2>/dev/null || exit 1
+LOG="/var/log/wp-auto-update.log"
+SITES_DIR="/etc/wp-hosting/sites"
+UPDATED=0; FAILED=0
+
+echo "[$(date '+%Y-%m-%d %H:%M')] Auto-Update gestartet" >> "$LOG"
+
+for CRED_FILE in "${SITES_DIR}"/*.txt; do
+    DOMAIN=$(basename "$CRED_FILE" .txt)
+    SITE_PATH="/var/www/${DOMAIN}"
+    [[ ! -d "$SITE_PATH" ]] && continue
+
+    WP="wp --path=${SITE_PATH} --allow-root"
+    $WP maintenance-mode activate 2>/dev/null || true
+    $WP core update            2>>"$LOG" && \
+    $WP plugin update --all    2>>"$LOG" && \
+    $WP theme update --all     2>>"$LOG" && \
+    $WP core update-db         2>>"$LOG" && \
+    $WP cache flush            2>/dev/null || true
+    EXIT=$?
+    $WP maintenance-mode deactivate 2>/dev/null || true
+
+    if [[ $EXIT -eq 0 ]]; then
+        echo "[$(date '+%Y-%m-%d %H:%M')] OK: ${DOMAIN}" >> "$LOG"
+        ((UPDATED++))
+    else
+        echo "[$(date '+%Y-%m-%d %H:%M')] FEHLER: ${DOMAIN}" >> "$LOG"
+        ((FAILED++))
+    fi
+done
+
+# FastCGI Cache leeren
+[[ -d /var/cache/nginx/wp ]] && rm -rf /var/cache/nginx/wp/* 2>/dev/null || true
+
+MSG="Auto-Update: ${UPDATED} OK, ${FAILED} Fehler"
+echo "[$(date '+%Y-%m-%d %H:%M')] ${MSG}" >> "$LOG"
+
+# Webhook-Benachrichtigung
+if [[ -n "${WEBHOOK_URL:-}" ]]; then
+    STATUS=$( [[ $FAILED -eq 0 ]] && echo "up" || echo "down" )
+    curl -fsS "${WEBHOOK_URL}?status=${STATUS}&msg=${MSG}" -o /dev/null 2>/dev/null || true
+fi
+AUEOF
+    chmod +x /usr/local/bin/wp-auto-update.sh
+    echo "0 3 * * 0 root /usr/local/bin/wp-auto-update.sh" > /etc/cron.d/wp-auto-update
+    log "Auto-Update-Cron aktiviert (sonntags 03:00 → /var/log/wp-auto-update.log)"
+fi
+
 # Konfiguration speichern
 cat > /etc/wp-hosting/config <<EOF
 VM_TYPE=${VM_TYPE}
@@ -440,6 +497,7 @@ DB_ADMIN_USER=${DB_ADMIN_USER}
 DB_ADMIN_PASS=${DB_ADMIN_PASS}
 WP_ADMIN_EMAIL=${WP_ADMIN_EMAIL}
 NPM_IP=${NPM_IP}
+WEBHOOK_URL=${WEBHOOK_URL:-}
 EOF
 chmod 600 /etc/wp-hosting/config
 
