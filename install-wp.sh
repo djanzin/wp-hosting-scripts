@@ -344,7 +344,9 @@ define('WP_CACHE_KEY_SALT', '${DOMAIN}:');
 define('DISABLE_WP_CRON', true);
 define('WP_POST_REVISIONS', 5);
 define('EMPTY_TRASH_DAYS', 7);
-define('DISALLOW_FILE_EDIT', true);" \
+define('DISALLOW_FILE_EDIT', true);
+define('FORCE_SSL_ADMIN', true);
+if (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { \$_SERVER['HTTPS'] = 'on'; }" \
     --allow-root
 
 sudo -u "$SYSTEM_USER" wp core install \
