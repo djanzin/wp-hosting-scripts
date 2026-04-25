@@ -289,14 +289,19 @@ EOF
 log "Log-Rotation konfiguriert (14 Tage, täglich komprimiert)"
 
 # ── phpMyAdmin ────────────────────────────────────────────────────────────
-info "phpMyAdmin wird installiert..."
 PMA_VERSION="5.2.2"
 PMA_DIR="/var/www/phpmyadmin"
 
-wget -q "https://files.phpmyadmin.net/phpMyAdmin/${PMA_VERSION}/phpMyAdmin-${PMA_VERSION}-all-languages.tar.gz" -O /tmp/pma.tar.gz
-tar -xzf /tmp/pma.tar.gz -C /tmp/
-mv "/tmp/phpMyAdmin-${PMA_VERSION}-all-languages" "$PMA_DIR"
-rm /tmp/pma.tar.gz
+if [[ -f "${PMA_DIR}/index.php" ]]; then
+    log "phpMyAdmin bereits installiert"
+else
+    info "phpMyAdmin wird installiert..."
+    wget -q "https://files.phpmyadmin.net/phpMyAdmin/${PMA_VERSION}/phpMyAdmin-${PMA_VERSION}-all-languages.tar.gz" -O /tmp/pma.tar.gz
+    tar -xzf /tmp/pma.tar.gz -C /tmp/
+    rm -rf "$PMA_DIR"
+    mv "/tmp/phpMyAdmin-${PMA_VERSION}-all-languages" "$PMA_DIR"
+    rm -f /tmp/pma.tar.gz
+fi
 
 BLOWFISH_SECRET=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32) || true
 
