@@ -349,12 +349,16 @@ ln -sf /etc/nginx/sites-available/phpmyadmin /etc/nginx/sites-enabled/
 log "phpMyAdmin installiert (Port 8080 → DB: ${DB_HOST})"
 
 # ── Filebrowser ───────────────────────────────────────────────────────────
-info "Filebrowser wird installiert..."
-FB_VERSION=$(curl -s https://api.github.com/repos/filebrowser/filebrowser/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
-wget -q "https://github.com/filebrowser/filebrowser/releases/download/v${FB_VERSION}/linux-amd64-filebrowser.tar.gz" -O /tmp/fb.tar.gz
-tar -xzf /tmp/fb.tar.gz -C /usr/local/bin/ filebrowser
-chmod +x /usr/local/bin/filebrowser
-rm /tmp/fb.tar.gz
+if command -v filebrowser &>/dev/null; then
+    info "Filebrowser bereits installiert"
+else
+    info "Filebrowser wird installiert..."
+    FB_VERSION=$(curl -s https://api.github.com/repos/filebrowser/filebrowser/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+    wget -q "https://github.com/filebrowser/filebrowser/releases/download/v${FB_VERSION}/linux-amd64-filebrowser.tar.gz" -O /tmp/fb.tar.gz
+    tar -xzf /tmp/fb.tar.gz -C /usr/local/bin/ filebrowser
+    chmod +x /usr/local/bin/filebrowser
+    rm /tmp/fb.tar.gz
+fi
 
 mkdir -p /etc/filebrowser
 FB_ADMIN_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 24) || true
@@ -433,11 +437,15 @@ fi
 systemctl restart ssh
 
 # ── Netdata ───────────────────────────────────────────────────────────────
-info "Netdata wird installiert..."
-wget -qO /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh
-bash /tmp/netdata-kickstart.sh --non-interactive --stable-channel --disable-telemetry 2>&1 | tail -5
-rm -f /tmp/netdata-kickstart.sh
-log "Netdata installiert (Port 19999)"
+if systemctl is-active --quiet netdata 2>/dev/null; then
+    log "Netdata bereits installiert"
+else
+    info "Netdata wird installiert..."
+    wget -qO /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh
+    bash /tmp/netdata-kickstart.sh --non-interactive --stable-channel --disable-telemetry 2>&1 | tail -5 || true
+    rm -f /tmp/netdata-kickstart.sh
+    log "Netdata installiert (Port 19999)"
+fi
 
 # ── UFW ───────────────────────────────────────────────────────────────────
 ufw --force reset
