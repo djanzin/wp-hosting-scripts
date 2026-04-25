@@ -176,17 +176,23 @@ log "VM ${VM_ID} konfiguriert"
 info "VM wird gestartet..."
 qm start "$VM_ID"
 
-# Warten bis VM erreichbar ist
-info "Warte auf SSH-Erreichbarkeit (max. 120s)..."
+# Warten bis SSH-Port erreichbar ist (TCP-Check, kein Login nötig)
+info "Warte auf SSH-Port (max. 120s)..."
+SSH_READY=false
 for i in $(seq 1 24); do
-    if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 -o BatchMode=yes \
-        ubuntu@"$VM_IP" "echo ok" &>/dev/null; then
+    if timeout 3 bash -c "echo >/dev/tcp/${VM_IP}/22" 2>/dev/null; then
+        SSH_READY=true
         break
     fi
     sleep 5
     echo -n "."
 done
 echo ""
+if $SSH_READY; then
+    log "VM ist über SSH erreichbar"
+else
+    warn "SSH-Port noch nicht erreichbar — VM bootet möglicherweise noch. Bitte kurz warten."
+fi
 
 # ── Zugangsdaten ausgeben ─────────────────────────────────────────────────
 echo ""

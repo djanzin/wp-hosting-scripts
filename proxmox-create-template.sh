@@ -111,7 +111,10 @@ qm create "$TEMPLATE_ID" \
 # Cloud Image als Disk importieren
 info "Disk wird importiert..."
 qm importdisk "$TEMPLATE_ID" "$IMG_FILE" "$STORAGE"
-qm set "$TEMPLATE_ID" --scsi0 "${STORAGE}:vm-${TEMPLATE_ID}-disk-1,cache=writethrough,discard=on,ssd=1"
+# Disk-Name dynamisch aus VM-Konfig lesen — Name variiert je nach Storage-Typ
+IMPORTED_DISK=$(qm config "$TEMPLATE_ID" | grep "^unused0:" | awk '{print $2}')
+[[ -z "$IMPORTED_DISK" ]] && err "Importierte Disk nicht gefunden — bitte manuell prüfen."
+qm set "$TEMPLATE_ID" --scsi0 "${IMPORTED_DISK},cache=writethrough,discard=on,ssd=1"
 
 # Cloud-init Drive
 qm set "$TEMPLATE_ID" --ide2 "${STORAGE}:cloudinit"

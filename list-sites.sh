@@ -42,7 +42,7 @@ for CRED_FILE in "${SITES_DIR}"/*.txt; do
         NGINX_STATUS="${GREEN}✓ aktiv${NC}"
     else
         NGINX_STATUS="${RED}✗ fehlt${NC}"
-        ((ISSUES++))
+        ISSUES=$((ISSUES + 1))
     fi
 
     # PHP-FPM Socket vorhanden?
@@ -50,7 +50,7 @@ for CRED_FILE in "${SITES_DIR}"/*.txt; do
         PHP_STATUS="${GREEN}✓ läuft${NC}"
     else
         PHP_STATUS="${RED}✗ fehlt${NC}"
-        ((ISSUES++))
+        ISSUES=$((ISSUES + 1))
     fi
 
     # Redis erreichbar?
@@ -65,8 +65,8 @@ for CRED_FILE in "${SITES_DIR}"/*.txt; do
         sed "s/\x1b\[[0-9;]*m//g" | awk '{printf "%-8s %-8s %-8s %-12s\n", $1, $2, $3, $4}' || \
         echo "$NGINX_STATUS $PHP_STATUS $REDIS_STATUS $INSTALLED"
 
-    ((TOTAL++))
-    [[ -S "/run/php/php8.3-fpm-${DOMAIN}.sock" ]] && ((RUNNING++)) || true
+    TOTAL=$((TOTAL + 1))
+    [[ -S "/run/php/php8.3-fpm-${DOMAIN}.sock" ]] && RUNNING=$((RUNNING + 1)) || true
 done
 
 echo ""

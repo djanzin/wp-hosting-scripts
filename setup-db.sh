@@ -294,6 +294,7 @@ mkdir -p /var/backups/mysql
 RCLONE_DEST_CFG="${RCLONE_DEST:-}"
 cat > /usr/local/bin/mysql-backup.sh <<BEOF
 #!/bin/bash
+set -eo pipefail
 BACKUP_DIR="/var/backups/mysql"
 DATE=\$(date +%Y%m%d_%H%M)
 KEEP_DAYS=7
@@ -302,10 +303,8 @@ OUTFILE="\${BACKUP_DIR}/all-databases_\${DATE}.sql.gz"
 RCLONE_DEST="${RCLONE_DEST_CFG}"
 
 echo "[\$(date '+%Y-%m-%d %H:%M')] Backup gestartet" >> "\$LOG"
-mysqldump --all-databases --single-transaction --quick --lock-tables=false \
-    | gzip > "\$OUTFILE"
-
-if [[ \$? -eq 0 ]]; then
+if mysqldump --all-databases --single-transaction --quick --lock-tables=false \
+    | gzip > "\$OUTFILE"; then
     SIZE=\$(du -sh "\$OUTFILE" | cut -f1)
     echo "[\$(date '+%Y-%m-%d %H:%M')] Lokal OK — \${SIZE}" >> "\$LOG"
 

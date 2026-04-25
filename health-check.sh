@@ -151,9 +151,9 @@ for f in "${SITES_DIR}"/*.txt; do
         echo -e "${HTTP_STATUS}     ${FPM_STATUS}     ${DB_STATUS}     ${REDIS_STATUS}"
 
     if $SITE_OK; then
-        ((OK_COUNT++))
+        OK_COUNT=$((OK_COUNT + 1))
     else
-        ((WARN_COUNT++))
+        WARN_COUNT=$((WARN_COUNT + 1))
         SITE_ISSUES+=("${DOMAIN}: HTTP=${HTTP_CODE} FPM=$(echo -e "$FPM_STATUS" | sed 's/\x1b\[[0-9;]*m//g') DB=$(echo -e "$DB_STATUS" | sed 's/\x1b\[[0-9;]*m//g')")
     fi
 done

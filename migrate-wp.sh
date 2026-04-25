@@ -236,6 +236,9 @@ php_admin_value[max_execution_time]   = ${PHP_EXEC}
 php_admin_value[max_input_vars]       = ${PHP_VARS}
 php_admin_value[error_log]            = /var/log/php/${DOMAIN}.error.log
 php_admin_flag[log_errors]            = on
+
+slowlog                               = /var/log/php/${DOMAIN}.slow.log
+request_slowlog_timeout               = 5s
 EOF
 mkdir -p /var/log/php
 
