@@ -68,6 +68,15 @@ read -rp "Gateway (z.B. 192.168.1.1): " VM_GW
 read -rp "DNS-Server [Standard: 1.1.1.1]: " VM_DNS
 VM_DNS=${VM_DNS:-1.1.1.1}
 
+read -rp "Netzwerk-Bridge [Standard: vmbr0]: " VM_BRIDGE
+VM_BRIDGE=${VM_BRIDGE:-vmbr0}
+
+read -rp "MAC-Adresse (leer = automatisch generieren): " VM_MAC
+if [[ -n "$VM_MAC" ]]; then
+    [[ ! "$VM_MAC" =~ ^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$ ]] && \
+        err "Ungültige MAC-Adresse (Format: AA:BB:CC:DD:EE:FF)"
+fi
+
 # Verfügbare Storages anzeigen
 echo ""
 info "Verfügbare Storages:"
@@ -104,6 +113,8 @@ echo -e "  RAM:      ${BOLD}$((VM_RAM / 1024)) GB${NC}"
 echo -e "  Disk:     ${BOLD}${VM_DISK} GB${NC}"
 echo -e "  IP:       ${BOLD}${VM_IP}/${VM_CIDR}${NC}"
 echo -e "  Gateway:  ${BOLD}${VM_GW}${NC}"
+echo -e "  Bridge:   ${BOLD}${VM_BRIDGE}${NC}"
+echo -e "  MAC:      ${BOLD}${VM_MAC:-automatisch}${NC}"
 echo ""
 read -rp "VM erstellen? [j/N]: " confirm
 [[ "$confirm" != "j" && "$confirm" != "J" ]] && err "Abgebrochen."
@@ -128,7 +139,12 @@ qm set "$VM_ID" \
 qm resize "$VM_ID" scsi0 "${VM_DISK}G"
 log "Disk auf ${VM_DISK} GB vergrößert"
 
-# Netzwerk & Cloud-init
+# Netzwerk-Interface mit optionaler MAC
+NET0_CONFIG="virtio,bridge=${VM_BRIDGE}"
+[[ -n "$VM_MAC" ]] && NET0_CONFIG="virtio=${VM_MAC},bridge=${VM_BRIDGE}"
+qm set "$VM_ID" --net0 "$NET0_CONFIG"
+
+# Cloud-init
 qm set "$VM_ID" \
     --ipconfig0 "ip=${VM_IP}/${VM_CIDR},gw=${VM_GW}" \
     --nameserver "$VM_DNS" \
