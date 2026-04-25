@@ -384,6 +384,21 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     log "WooCommerce installiert"
 fi
 
+# ── Must-Use Plugin: Cache-Check deaktivieren ────────────────────────────
+mkdir -p "${SITE_PATH}/wp-content/mu-plugins"
+cat > "${SITE_PATH}/wp-content/mu-plugins/server-cache.php" <<'MUPLUGIN'
+<?php
+/**
+ * Caching wird durch Nginx FastCGI Cache + Redis auf Server-Ebene gehandhabt.
+ * Deaktiviert den WordPress Site Health Page-Cache-Check.
+ */
+add_filter('site_status_tests', function($tests) {
+    unset($tests['async']['page_cache']);
+    return $tests;
+});
+MUPLUGIN
+log "Must-Use Plugin erstellt (Site Health Cache-Check deaktiviert)"
+
 # ── WP-Cron via System-Cron ───────────────────────────────────────────────
 # DISABLE_WP_CRON=true → kein Cron-Aufruf bei jedem Seitenaufruf
 echo "*/5 * * * * ${SYSTEM_USER} /usr/local/bin/wp --path=${SITE_PATH} cron event run --due-now --allow-root 2>/dev/null" \
