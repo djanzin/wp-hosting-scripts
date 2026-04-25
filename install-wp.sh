@@ -418,6 +418,30 @@ nginx -t && systemctl reload nginx
 systemctl reload php8.3-fpm
 log "Nginx und PHP-FPM neu geladen"
 
+# ── Filebrowser User anlegen ─────────────────────────────────────────────
+FB_DB="/etc/filebrowser/database.db"
+FB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20) || true
+FB_USER="${DOMAIN_SAFE:0:32}"
+
+if [[ -f "$FB_DB" ]] && command -v filebrowser &>/dev/null; then
+    filebrowser users add "$FB_USER" "$FB_PASS" \
+        --scope "$SITE_PATH" \
+        --database "$FB_DB" \
+        --perm.create \
+        --perm.rename \
+        --perm.modify \
+        --perm.delete \
+        --perm.download 2>/dev/null || \
+    filebrowser users update "$FB_USER" \
+        --password "$FB_PASS" \
+        --scope "$SITE_PATH" \
+        --database "$FB_DB" 2>/dev/null || true
+    log "Filebrowser User angelegt: ${FB_USER}"
+else
+    warn "Filebrowser nicht gefunden — User manuell anlegen"
+    FB_PASS="n/a"
+fi
+
 # ── SFTP Chroot einrichten ────────────────────────────────────────────────
 SFTP_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20) || true
 SFTP_CHROOT="/var/sftp/${SYSTEM_USER}"
@@ -471,6 +495,10 @@ DB-Name:       ${DB_NAME}
 DB-User:       ${DB_USER}
 DB-Pass:       ${DB_PASS}
 
+── Filebrowser ───────────────────────────────
+FB-User:       ${FB_USER}
+FB-Pass:       ${FB_PASS}
+
 ── SFTP ──────────────────────────────────────
 SFTP-Host:     $(hostname -I | awk '{print $1}')
 SFTP-Port:     22
@@ -501,6 +529,9 @@ echo ""
 echo -e "  DB-Name:       ${BOLD}${DB_NAME}${NC}"
 echo -e "  DB-User:       ${BOLD}${DB_USER}${NC}"
 echo -e "  DB-Pass:       ${BOLD}${DB_PASS}${NC}"
+echo ""
+echo -e "  FB-User:       ${BOLD}${FB_USER}${NC}"
+echo -e "  FB-Pass:       ${BOLD}${FB_PASS}${NC}"
 echo ""
 echo -e "  SFTP-Host:     ${BOLD}$(hostname -I | awk '{print $1}')${NC}"
 echo -e "  SFTP-User:     ${BOLD}${SYSTEM_USER}${NC}"
