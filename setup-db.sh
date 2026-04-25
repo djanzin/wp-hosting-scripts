@@ -79,8 +79,12 @@ log "Pakete installiert"
 
 # ── rclone installieren ───────────────────────────────────────────────────
 if [[ -n "$RCLONE_REMOTE" ]]; then
-    curl -fsS https://rclone.org/install.sh | bash 2>&1 | tail -3
-    log "rclone installiert"
+    if command -v rclone &>/dev/null; then
+        log "rclone bereits installiert ($(rclone --version 2>/dev/null | head -1))"
+    else
+        curl -fsS https://rclone.org/install.sh | bash 2>&1 | tail -3
+        log "rclone installiert"
+    fi
 
     mkdir -p /root/.config/rclone
     case "$RCLONE_CHOICE" in
@@ -283,11 +287,15 @@ fi
 systemctl restart ssh
 
 # ── Netdata ───────────────────────────────────────────────────────────────
-info "Netdata wird installiert..."
-wget -qO /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh
-bash /tmp/netdata-kickstart.sh --non-interactive --stable-channel --disable-telemetry 2>&1 | tail -5
-rm -f /tmp/netdata-kickstart.sh
-log "Netdata installiert (Port 19999)"
+if systemctl is-active --quiet netdata 2>/dev/null; then
+    log "Netdata bereits installiert"
+else
+    info "Netdata wird installiert..."
+    wget -qO /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh
+    bash /tmp/netdata-kickstart.sh --non-interactive --stable-channel --disable-telemetry 2>&1 | tail -5 || true
+    rm -f /tmp/netdata-kickstart.sh
+    log "Netdata installiert (Port 19999)"
+fi
 
 # ── MariaDB Backup-Cron ────────────────────────────────────────────────────
 mkdir -p /var/backups/mysql
