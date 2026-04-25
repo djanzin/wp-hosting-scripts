@@ -236,7 +236,7 @@ ADMIN_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32) || true
 IFS=',' read -ra VM_IPS <<< "$WEB_VM_IPS"
 for VM_IP in "${VM_IPS[@]}"; do
     VM_IP=$(echo "$VM_IP" | tr -d ' ')
-    mysql -e "CREATE USER IF NOT EXISTS '${ADMIN_USER}'@'${VM_IP}' IDENTIFIED BY '${ADMIN_PASS}';"
+    mysql -e "CREATE OR REPLACE USER '${ADMIN_USER}'@'${VM_IP}' IDENTIFIED BY '${ADMIN_PASS}';"
     mysql -e "GRANT ALL PRIVILEGES ON *.* TO '${ADMIN_USER}'@'${VM_IP}' WITH GRANT OPTION;"
     log "DB-Admin-User für ${VM_IP} angelegt"
 done
