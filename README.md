@@ -53,14 +53,17 @@ Erstellt ein Ubuntu 24.04 Cloud-init Template (Standard-ID: 9000).
 
 ---
 
-### Schritt 2: VMs anlegen (Proxmox Host, pro VM)
+### Schritt 2: Alle VMs anlegen (Proxmox Host, 3× wiederholen)
 
 ```bash
 curl -sO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/proxmox-create-vm.sh
-bash proxmox-create-vm.sh
+
+bash proxmox-create-vm.sh   # → Datenbank-VM
+bash proxmox-create-vm.sh   # → WordPress-VM
+bash proxmox-create-vm.sh   # → WooCommerce-VM
 ```
 
-Das Script fragt nach VM-Typ, IP, Hostname, Storage — und gibt am Ende den SSH-Befehl für den nächsten Schritt aus.
+Das Script fragt nach VM-Typ, IP, MAC, Hostname und Storage. Alle drei VMs erst vollständig anlegen, bevor mit Schritt 3 begonnen wird.
 
 **Empfohlene Ressourcen pro VM-Typ:**
 
@@ -84,7 +87,7 @@ Das Script gibt DB-Admin-Zugangsdaten aus → für Schritt 4 notieren.
 
 ---
 
-### Schritt 4: Web-VM(s) einrichten
+### Schritt 4: Web-VMs einrichten (je VM wiederholen)
 
 ```bash
 ssh ubuntu@<WEB-VM-IP>
@@ -92,7 +95,7 @@ curl -sO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/setup
 sudo bash setup-web.sh
 ```
 
-Fragt nach VM-Typ (WP/WooCommerce), DB-VM-IP und DB-Zugangsdaten aus Schritt 3.
+Fragt nach VM-Typ (WP/WooCommerce), DB-VM-IP und DB-Zugangsdaten aus Schritt 3. Für WordPress-VM und WooCommerce-VM jeweils separat ausführen.
 
 ---
 
