@@ -90,6 +90,16 @@ fi
 rm -rf "$SITE_PATH"
 log "Site-Verzeichnis entfernt: ${SITE_PATH}"
 
+# ── SFTP Chroot aufräumen ─────────────────────────────────────────────────
+SFTP_CHROOT="/var/sftp/${SYSTEM_USER}"
+if [[ -d "$SFTP_CHROOT" ]]; then
+    umount "${SFTP_CHROOT}/site" 2>/dev/null || true
+    # fstab-Eintrag entfernen
+    sed -i "\|${SFTP_CHROOT}/site|d" /etc/fstab
+    rm -rf "$SFTP_CHROOT"
+    log "SFTP Chroot entfernt: ${SFTP_CHROOT}"
+fi
+
 # ── Systemuser ────────────────────────────────────────────────────────────
 if id "$SYSTEM_USER" &>/dev/null; then
     userdel "$SYSTEM_USER" 2>/dev/null || true
