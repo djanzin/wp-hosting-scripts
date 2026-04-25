@@ -71,10 +71,21 @@ VM_DNS=${VM_DNS:-1.1.1.1}
 # Verfügbare Storages anzeigen
 echo ""
 info "Verfügbare Storages:"
-pvesm status | awk 'NR>1 {print "  " $1 " (" $2 ")"}'
+mapfile -t STORAGE_LIST < <(pvesm status | awk 'NR>1 {print $1}')
+for i in "${!STORAGE_LIST[@]}"; do
+    TYPE=$(pvesm status | awk -v name="${STORAGE_LIST[$i]}" '$1==name {print $2}')
+    printf "  %d) %s (%s)\n" "$((i+1))" "${STORAGE_LIST[$i]}" "$TYPE"
+done
 echo ""
-read -rp "Storage [Standard: local-lvm]: " STORAGE
-STORAGE=${STORAGE:-local-lvm}
+read -rp "Storage [Nummer oder Name]: " STORAGE_INPUT
+if [[ "$STORAGE_INPUT" =~ ^[0-9]+$ ]] && \
+   [[ "$STORAGE_INPUT" -ge 1 ]] && \
+   [[ "$STORAGE_INPUT" -le "${#STORAGE_LIST[@]}" ]]; then
+    STORAGE="${STORAGE_LIST[$((STORAGE_INPUT-1))]}"
+else
+    STORAGE="${STORAGE_INPUT:-local-lvm}"
+fi
+info "Storage: ${BOLD}${STORAGE}${NC}"
 
 # Optionaler SSH Public Key
 echo ""
