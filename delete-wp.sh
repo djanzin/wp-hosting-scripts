@@ -90,6 +90,14 @@ fi
 rm -rf "$SITE_PATH"
 log "Site-Verzeichnis entfernt: ${SITE_PATH}"
 
+# ── Filebrowser User entfernen ────────────────────────────────────────────
+FB_DB="/etc/filebrowser/database.db"
+FB_USER="${DOMAIN_SAFE:0:32}"
+if [[ -f "$FB_DB" ]] && command -v filebrowser &>/dev/null; then
+    filebrowser users rm "$FB_USER" --database "$FB_DB" 2>/dev/null || true
+    log "Filebrowser User entfernt: ${FB_USER}"
+fi
+
 # ── SFTP Chroot aufräumen ─────────────────────────────────────────────────
 SFTP_CHROOT="/var/sftp/${SYSTEM_USER}"
 if [[ -d "$SFTP_CHROOT" ]]; then
