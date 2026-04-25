@@ -53,8 +53,8 @@ read -rp "Auswahl [1/2]: " method_choice
 DOMAIN_SAFE=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
 SITE_PATH="/var/www/${DOMAIN}"
 DB_NAME="wp_${DOMAIN_SAFE}"
-DB_USER="wpdb_$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 10)"
-DB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32)
+DB_USER="wpdb_$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 10 || true)"
+DB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32) || true
 SYSTEM_USER="wp_${DOMAIN_SAFE:0:20}"
 WEB_VM_IP=$(hostname -I | awk '{print $1}')
 

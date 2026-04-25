@@ -68,7 +68,7 @@ read -rp "Auswahl [1/2]: " pass_choice
 
 case "$pass_choice" in
     1)
-        NEW_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9!@#%^&*' | head -c 28)
+        NEW_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9!@#%^&*' | head -c 28) || true
         ;;
     2)
         read -rsp "Neues Passwort (mind. 12 Zeichen): " NEW_PASS; echo ""

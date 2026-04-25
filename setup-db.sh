@@ -230,7 +230,7 @@ mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
 mysql -e "FLUSH PRIVILEGES;"
 
 ADMIN_USER="wp_admin"
-ADMIN_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32)
+ADMIN_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32) || true
 
 # Admin-User für jede Web-VM-IP anlegen
 IFS=',' read -ra VM_IPS <<< "$WEB_VM_IPS"

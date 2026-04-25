@@ -81,7 +81,7 @@ echo ""
 read -rp "SSH Public Key einfügen (leer = überspringen): " SSH_KEY
 
 # Zufälliges Cloud-init Passwort
-CI_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20)
+CI_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20) || true
 
 echo ""
 echo -e "${BOLD}Zusammenfassung:${NC}"

@@ -58,8 +58,8 @@ read -rp "Klonen starten? [j/N]: " confirm
 DST_SAFE=$(echo "$DST_DOMAIN" | tr '.' '_' | tr '-' '_')
 DST_PATH="/var/www/${DST_DOMAIN}"
 DST_DB_NAME="wp_${DST_SAFE}"
-DST_DB_USER="wpdb_$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 10)"
-DST_DB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32)
+DST_DB_USER="wpdb_$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 10 || true)"
+DST_DB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32) || true
 DST_SYSTEM_USER="wp_${DST_SAFE:0:20}"
 DST_SOCK="/run/php/php8.3-fpm-${DST_DOMAIN}.sock"
 WEB_VM_IP=$(hostname -I | awk '{print $1}')

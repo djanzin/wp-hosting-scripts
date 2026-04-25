@@ -299,7 +299,7 @@ tar -xzf /tmp/pma.tar.gz -C /tmp/
 mv "/tmp/phpMyAdmin-${PMA_VERSION}-all-languages" "$PMA_DIR"
 rm /tmp/pma.tar.gz
 
-BLOWFISH_SECRET=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32)
+BLOWFISH_SECRET=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32) || true
 
 cat > "${PMA_DIR}/config.inc.php" <<EOF
 <?php
@@ -357,7 +357,7 @@ chmod +x /usr/local/bin/filebrowser
 rm /tmp/fb.tar.gz
 
 mkdir -p /etc/filebrowser
-FB_ADMIN_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 24)
+FB_ADMIN_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 24) || true
 FB_HASHED_PASS=$(filebrowser hash "$FB_ADMIN_PASS" 2>/dev/null || echo "$FB_ADMIN_PASS")
 
 cat > /etc/filebrowser/settings.json <<'EOF'

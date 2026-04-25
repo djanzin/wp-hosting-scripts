@@ -60,11 +60,11 @@ DOMAIN_SAFE=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
 
 DB_NAME="wp_${DOMAIN_SAFE}"
 # DB-Username max 32 Zeichen (MariaDB-Limit)
-DB_USER="wpdb_$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 10)"
-DB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32)
+DB_USER="wpdb_$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 10 || true)"
+DB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32) || true
 
-WP_ADMIN_USER=$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 14)
-WP_ADMIN_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9!@#%^&*' | head -c 28)
+WP_ADMIN_USER=$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 14) || true
+WP_ADMIN_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9!@#%^&*' | head -c 28) || true
 
 SITE_PATH="/var/www/${DOMAIN}"
 SYSTEM_USER="wp_${DOMAIN_SAFE:0:20}"

@@ -58,7 +58,7 @@ read -rp "Netzwerk-Bridge [Standard: vmbr0]: " BRIDGE
 BRIDGE=${BRIDGE:-vmbr0}
 
 # SSH Root Passwort generieren
-ROOT_SSH_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9!@#%^&*' | head -c 24)
+ROOT_SSH_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9!@#%^&*' | head -c 24) || true
 
 echo ""
 info "Template-ID: ${BOLD}${TEMPLATE_ID}${NC}"
