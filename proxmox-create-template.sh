@@ -119,30 +119,26 @@ qm set "$TEMPLATE_ID" --ide2 "${STORAGE}:cloudinit"
 # Boot von der Disk
 qm set "$TEMPLATE_ID" --boot order=scsi0
 
-# Cloud-init Standardwerte inkl. Root-SSH-Passwort
+# Cloud-init: Proxmox generiert User-Daten (ubuntu-User + Passwort)
+# vendor= ergänzt nur — überschreibt --cipassword NICHT (im Gegensatz zu user=)
 qm set "$TEMPLATE_ID" \
     --citype nocloud \
     --ciuser ubuntu \
     --cipassword "$ROOT_SSH_PASS" \
     --ipconfig0 "ip=dhcp"
 
-# SSH Root Login via Cloud-init user-data aktivieren
-cat > /tmp/vm-userdata.yaml <<EOF
+# Vendor-Daten: SSH-Passwort-Login aktivieren (läuft zusätzlich zu Proxmox-User-Daten)
+mkdir -p /var/lib/vz/snippets
+cat > /var/lib/vz/snippets/vm-vendor.yaml <<'EOF'
 #cloud-config
-chpasswd:
-  expire: false
 ssh_pwauth: true
 disable_root: false
 runcmd:
   - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
   - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
   - systemctl restart sshd
-  - echo "root:${ROOT_SSH_PASS}" | chpasswd
 EOF
-qm set "$TEMPLATE_ID" --cicustom "user=local:snippets/vm-userdata.yaml"
-mkdir -p /var/lib/vz/snippets
-cp /tmp/vm-userdata.yaml /var/lib/vz/snippets/vm-userdata.yaml
-rm -f /tmp/vm-userdata.yaml
+qm set "$TEMPLATE_ID" --cicustom "vendor=local:snippets/vm-vendor.yaml"
 
 # Disk vergrößern
 qm resize "$TEMPLATE_ID" scsi0 "${TEMPLATE_DISK}G"
