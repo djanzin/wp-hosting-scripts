@@ -418,6 +418,40 @@ nginx -t && systemctl reload nginx
 systemctl reload php8.3-fpm
 log "Nginx und PHP-FPM neu geladen"
 
+# ── SFTP Chroot einrichten ────────────────────────────────────────────────
+SFTP_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20) || true
+SFTP_CHROOT="/var/sftp/${SYSTEM_USER}"
+
+# sftpusers Gruppe sicherstellen (falls setup-web.sh noch nicht gelaufen)
+groupadd --system sftpusers 2>/dev/null || true
+
+# User zur SFTP-Gruppe hinzufügen und Passwort setzen
+usermod -aG sftpusers "$SYSTEM_USER"
+echo "${SYSTEM_USER}:${SFTP_PASS}" | chpasswd
+
+# Chroot-Verzeichnis (muss root:root 755 sein — SSH-Anforderung)
+mkdir -p "${SFTP_CHROOT}"
+chown root:root "${SFTP_CHROOT}"
+chmod 755 "${SFTP_CHROOT}"
+
+# site/-Unterverzeichnis als Bind-Mount-Ziel
+mkdir -p "${SFTP_CHROOT}/site"
+chown "${SYSTEM_USER}:www-data" "${SFTP_CHROOT}/site"
+chmod 750 "${SFTP_CHROOT}/site"
+
+# Bind-Mount (idempotent)
+if ! mountpoint -q "${SFTP_CHROOT}/site"; then
+    mount --bind "${SITE_PATH}" "${SFTP_CHROOT}/site"
+fi
+
+# fstab-Eintrag (idempotent)
+FSTAB_ENTRY="${SITE_PATH} ${SFTP_CHROOT}/site none bind 0 0"
+if ! grep -qF "$FSTAB_ENTRY" /etc/fstab; then
+    echo "$FSTAB_ENTRY" >> /etc/fstab
+fi
+
+log "SFTP Chroot eingerichtet: ${SFTP_CHROOT}"
+
 # ── Zugangsdaten speichern ────────────────────────────────────────────────
 CRED_FILE="/etc/wp-hosting/sites/${DOMAIN}.txt"
 cat > "$CRED_FILE" <<EOF
@@ -436,6 +470,13 @@ DB-Host:       ${DB_HOST}
 DB-Name:       ${DB_NAME}
 DB-User:       ${DB_USER}
 DB-Pass:       ${DB_PASS}
+
+── SFTP ──────────────────────────────────────
+SFTP-Host:     $(hostname -I | awk '{print $1}')
+SFTP-Port:     22
+SFTP-User:     ${SYSTEM_USER}
+SFTP-Pass:     ${SFTP_PASS}
+SFTP-Pfad:     /site
 
 ── Server ────────────────────────────────────
 Site-Pfad:     ${SITE_PATH}
@@ -460,6 +501,11 @@ echo ""
 echo -e "  DB-Name:       ${BOLD}${DB_NAME}${NC}"
 echo -e "  DB-User:       ${BOLD}${DB_USER}${NC}"
 echo -e "  DB-Pass:       ${BOLD}${DB_PASS}${NC}"
+echo ""
+echo -e "  SFTP-Host:     ${BOLD}$(hostname -I | awk '{print $1}')${NC}"
+echo -e "  SFTP-User:     ${BOLD}${SYSTEM_USER}${NC}"
+echo -e "  SFTP-Pass:     ${BOLD}${SFTP_PASS}${NC}"
+echo -e "  SFTP-Pfad:     ${BOLD}/site${NC}"
 echo ""
 echo -e "${YELLOW}  → Zugangsdaten gespeichert: ${CRED_FILE}${NC}"
 echo -e "${YELLOW}  → NPM Proxy-Host für https://${DOMAIN} anlegen (→ Port 80).${NC}"

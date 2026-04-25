@@ -416,13 +416,41 @@ bantime  = 3600
 EOF
 log "Fail2ban konfiguriert"
 
-# ── SSH Hardening ─────────────────────────────────────────────────────────
+# ── SSH Hardening & SFTP ─────────────────────────────────────────────────
 SSH_CONFIG="/etc/ssh/sshd_config"
 sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'          "$SSH_CONFIG"
 sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/'                  "$SSH_CONFIG"
 sed -i 's/^#*LoginGraceTime.*/LoginGraceTime 20/'             "$SSH_CONFIG"
 sed -i 's/^#*X11Forwarding.*/X11Forwarding no/'               "$SSH_CONFIG"
 sed -i 's/^#*AllowTcpForwarding.*/AllowTcpForwarding no/'     "$SSH_CONFIG"
+
+# SFTP Subsystem auf internal-sftp umstellen (für Chroot)
+if grep -q "^Subsystem\s*sftp" "$SSH_CONFIG"; then
+    sed -i 's|^Subsystem\s*sftp.*|Subsystem sftp internal-sftp|' "$SSH_CONFIG"
+else
+    echo "Subsystem sftp internal-sftp" >> "$SSH_CONFIG"
+fi
+
+# Match-Block für chroot SFTP (nur einmal einfügen)
+if ! grep -q "Match Group sftpusers" "$SSH_CONFIG"; then
+    cat >> "$SSH_CONFIG" <<'SFTPEOF'
+
+# ── Chroot SFTP pro Site ───────────────────────────────────────────────────
+Match Group sftpusers
+    ChrootDirectory /var/sftp/%u
+    ForceCommand internal-sftp -d /site
+    AllowTcpForwarding no
+    X11Forwarding no
+    PasswordAuthentication yes
+SFTPEOF
+fi
+
+# sftpusers Gruppe und Basis-Verzeichnis
+groupadd --system sftpusers 2>/dev/null || true
+mkdir -p /var/sftp
+chown root:root /var/sftp
+chmod 755 /var/sftp
+log "SFTP Chroot konfiguriert (/var/sftp)"
 
 echo ""
 read -rp "SSH Public Key für ubuntu-User hinterlegen? (leer = überspringen): " SSH_PUB_KEY
