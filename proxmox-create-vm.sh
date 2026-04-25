@@ -135,9 +135,14 @@ qm set "$VM_ID" \
     --memory "$VM_RAM" \
     --balloon 0
 
-# Disk vergrößern
-qm resize "$VM_ID" scsi0 "${VM_DISK}G"
-log "Disk auf ${VM_DISK} GB vergrößert"
+# Disk nur vergrößern wenn Zielgröße > aktuelle Größe (Proxmox unterstützt kein Shrinking)
+CURRENT_DISK_GB=$(qm config "$VM_ID" | grep "scsi0:" | grep -oP 'size=\K[0-9]+' || echo "0")
+if [[ "${VM_DISK}" -gt "${CURRENT_DISK_GB:-0}" ]]; then
+    qm resize "$VM_ID" scsi0 "${VM_DISK}G"
+    log "Disk auf ${VM_DISK} GB vergrößert"
+else
+    warn "Template-Disk (${CURRENT_DISK_GB} GB) ≥ Zielgröße (${VM_DISK} GB) — Größe wird beibehalten"
+fi
 
 # Netzwerk-Interface mit optionaler MAC
 NET0_CONFIG="virtio,bridge=${VM_BRIDGE}"

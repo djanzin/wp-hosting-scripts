@@ -37,6 +37,7 @@ read -rp "RAM in MB [Standard: 2048]: " TEMPLATE_RAM
 TEMPLATE_RAM=${TEMPLATE_RAM:-2048}
 [[ ! "$TEMPLATE_RAM" =~ ^[0-9]+$ ]] && err "Ungültiger RAM-Wert."
 
+echo -e "${YELLOW}  Tipp: Disk klein halten (≤ kleinste VM-Disk), da Proxmox beim Klonen nicht verkleinern kann.${NC}"
 read -rp "Disk-Größe in GB [Standard: 10]: " TEMPLATE_DISK
 TEMPLATE_DISK=${TEMPLATE_DISK:-10}
 [[ ! "$TEMPLATE_DISK" =~ ^[0-9]+$ ]] && err "Ungültiger Disk-Wert."
