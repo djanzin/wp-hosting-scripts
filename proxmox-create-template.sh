@@ -41,11 +41,6 @@ read -rp "Disk-Größe in GB [Standard: 10]: " TEMPLATE_DISK
 TEMPLATE_DISK=${TEMPLATE_DISK:-10}
 [[ ! "$TEMPLATE_DISK" =~ ^[0-9]+$ ]] && err "Ungültiger Disk-Wert."
 
-read -rp "MAC-Adresse (leer = automatisch generieren): " TEMPLATE_MAC
-if [[ -n "$TEMPLATE_MAC" ]]; then
-    [[ ! "$TEMPLATE_MAC" =~ ^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$ ]] && err "Ungültige MAC-Adresse (Format: AA:BB:CC:DD:EE:FF)"
-fi
-
 # Verfügbare Storages anzeigen
 echo ""
 info "Verfügbare Storages:"
@@ -76,7 +71,6 @@ info "Template-ID: ${BOLD}${TEMPLATE_ID}${NC}"
 info "vCPU:        ${BOLD}${TEMPLATE_CORES}${NC}"
 info "RAM:         ${BOLD}${TEMPLATE_RAM} MB${NC}"
 info "Disk:        ${BOLD}${TEMPLATE_DISK} GB${NC}"
-info "MAC:         ${BOLD}${TEMPLATE_MAC:-automatisch}${NC}"
 info "Storage:     ${BOLD}${STORAGE}${NC}"
 info "Bridge:      ${BOLD}${BRIDGE}${NC}"
 echo ""
@@ -98,15 +92,11 @@ fi
 # ── VM erstellen ──────────────────────────────────────────────────────────
 info "VM ${TEMPLATE_ID} wird erstellt..."
 
-# MAC-Adresse für net0 zusammenbauen
-NET0_CONFIG="virtio,bridge=${BRIDGE}"
-[[ -n "$TEMPLATE_MAC" ]] && NET0_CONFIG="virtio=${TEMPLATE_MAC},bridge=${BRIDGE}"
-
 qm create "$TEMPLATE_ID" \
     --name "ubuntu-2404-template" \
     --memory "$TEMPLATE_RAM" \
     --cores "$TEMPLATE_CORES" \
-    --net0 "$NET0_CONFIG" \
+    --net0 "virtio,bridge=${BRIDGE}" \
     --ostype l26 \
     --machine q35 \
     --bios ovmf \
@@ -174,7 +164,6 @@ echo -e "  Template-ID:     ${BOLD}${TEMPLATE_ID}${NC}"
 echo -e "  vCPU:            ${BOLD}${TEMPLATE_CORES}${NC}"
 echo -e "  RAM:             ${BOLD}${TEMPLATE_RAM} MB${NC}"
 echo -e "  Disk:            ${BOLD}${TEMPLATE_DISK} GB${NC}"
-echo -e "  MAC:             ${BOLD}${TEMPLATE_MAC:-automatisch}${NC}"
 echo -e "  Storage:         ${BOLD}${STORAGE}${NC}"
 echo ""
 echo -e "${BOLD}  SSH Root-Passwort: ${ROOT_SSH_PASS}${NC}"
