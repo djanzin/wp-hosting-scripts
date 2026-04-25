@@ -280,7 +280,7 @@ if [[ -n "$SSH_PUB_KEY" ]]; then
 else
     warn "Kein SSH Key — Passwort-Login bleibt aktiv"
 fi
-systemctl restart sshd
+systemctl restart ssh
 
 # ── Netdata ───────────────────────────────────────────────────────────────
 info "Netdata wird installiert..."

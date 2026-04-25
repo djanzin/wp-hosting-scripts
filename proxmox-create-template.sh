@@ -139,7 +139,7 @@ disable_root: false
 runcmd:
   - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
   - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-  - systemctl restart sshd
+  - systemctl restart ssh
 EOF
 qm set "$TEMPLATE_ID" --cicustom "vendor=local:snippets/vm-vendor.yaml"
 
