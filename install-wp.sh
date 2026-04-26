@@ -344,7 +344,7 @@ log "Datenbank angelegt: ${DB_NAME}"
 
 # ── WordPress installieren ────────────────────────────────────────────────
 info "WordPress wird heruntergeladen..."
-sudo -u "$SYSTEM_USER" wp core download --path="$SITE_PATH" --locale=de_DE --allow-root
+sudo -u "$SYSTEM_USER" wp core download --path="$SITE_PATH" --locale=en_US --allow-root
 
 sudo -u "$SYSTEM_USER" wp config create \
     --path="$SITE_PATH" \
@@ -376,6 +376,13 @@ sudo -u "$SYSTEM_USER" wp core install \
     --allow-root
 log "WordPress installiert"
 
+# ── WordPress-Einstellungen ────────────────────────────────────────────────
+sudo -u "$SYSTEM_USER" wp option update timezone_string "Europe/Berlin" --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update date_format "Y-m-d"             --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update time_format "H:i"               --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update WPLANG ""                       --path="$SITE_PATH" --allow-root
+log "Einstellungen gesetzt (Timezone: Europe/Berlin, Sprache: English)"
+
 # ── Redis Object Cache ─────────────────────────────────────────────────────
 sudo -u "$SYSTEM_USER" wp plugin install redis-cache --activate --path="$SITE_PATH" --allow-root
 sudo -u "$SYSTEM_USER" wp redis enable --path="$SITE_PATH" --allow-root 2>/dev/null || true
@@ -394,7 +401,7 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     sudo -u "$SYSTEM_USER" wp plugin install woocommerce --activate --path="$SITE_PATH" --allow-root
 
     # Deutsche Sprachdateien
-    sudo -u "$SYSTEM_USER" wp language plugin install woocommerce de_DE --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp language plugin install woocommerce en_US --path="$SITE_PATH" --allow-root 2>/dev/null || true
     log "WooCommerce installiert"
 fi
 
