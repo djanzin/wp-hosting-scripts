@@ -426,6 +426,10 @@ log "Redis Object Cache aktiviert"
 sudo -u "$SYSTEM_USER" wp plugin install fluent-smtp --activate --path="$SITE_PATH" --allow-root
 log "FluentSMTP installiert (→ SMTP-Zugangsdaten in WP-Admin → FluentSMTP eintragen)"
 
+# ── Two Factor (2FA für WP-Admin) ────────────────────────────────────────
+sudo -u "$SYSTEM_USER" wp plugin install two-factor --activate --path="$SITE_PATH" --allow-root
+log "Two Factor installiert (→ Profil → Two Factor Options → QR-Code scannen)"
+
 # ── SEOpress ──────────────────────────────────────────────────────────────
 sudo -u "$SYSTEM_USER" wp plugin install seopress --activate --path="$SITE_PATH" --allow-root
 SEOPRESS_PRO_ZIP="/etc/wp-hosting/plugins/seopress-pro.zip"
