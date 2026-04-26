@@ -52,6 +52,8 @@ read -rp "IP-Adresse des Nginx Proxy Managers (für Real-IP): " NPM_IP
 
 read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
 
+read -rsp "SEOpress Pro Lizenz-Key (leer = überspringen): " SEOPRESS_KEY; echo ""
+
 echo ""
 echo "Remote-Backup für WordPress-Dateien (wp-content) konfigurieren?"
 echo "  1) Cloudflare R2"
@@ -712,6 +714,8 @@ echo "0 2 * * * root /usr/local/bin/wp-backup-files.sh" > /etc/cron.d/wp-backup-
 log "Datei-Backup eingerichtet (täglich 02:00 → ${BACKUP_LOCAL})"
 
 # Konfiguration speichern
+mkdir -p /etc/wp-hosting/plugins
+
 cat > /etc/wp-hosting/config <<EOF
 VM_TYPE=${VM_TYPE}
 DB_HOST=${DB_HOST}
@@ -722,6 +726,7 @@ NPM_IP=${NPM_IP}
 WEBHOOK_URL=${WEBHOOK_URL:-}
 RCLONE_REMOTE=${RCLONE_REMOTE:-}
 RCLONE_DEST=${RCLONE_DEST:-}
+SEOPRESS_KEY=${SEOPRESS_KEY:-}
 EOF
 chmod 600 /etc/wp-hosting/config
 
@@ -754,6 +759,8 @@ echo -e "  Datei-Backup:  ${BOLD}${BACKUP_LOCAL}${NC} (täglich 02:00)"
     echo -e "  Remote-Backup: ${BOLD}${RCLONE_DEST}${NC}"
 echo ""
 echo -e "${YELLOW}  → Filebrowser-Passwort notieren!${NC}"
+[[ -n "${SEOPRESS_KEY:-}" ]] && \
+    echo -e "${YELLOW}  → SEOpress Pro ZIP hochladen: scp wp-seopress-pro-*.zip root@$(hostname -I | awk '{print $1}'):/etc/wp-hosting/plugins/seopress-pro.zip${NC}"
 echo -e "${YELLOW}  → NPM Proxy-Hosts für Port 8080, 8090 und 19999 anlegen.${NC}"
 echo -e "${YELLOW}  → Netdata in Uptime Kuma als Monitor hinzufügen.${NC}"
 echo ""

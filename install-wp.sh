@@ -362,6 +362,7 @@ define('WP_POST_REVISIONS', 5);
 define('EMPTY_TRASH_DAYS', 7);
 define('DISALLOW_FILE_EDIT', true);
 define('FORCE_SSL_ADMIN', true);
+$([ -n "${SEOPRESS_KEY:-}" ] && echo "define('SEOPRESS_LICENSE_KEY', '${SEOPRESS_KEY}');")
 define('WP_DEBUG', false);
 define('WP_DEBUG_LOG', false);
 define('WP_DEBUG_DISPLAY', false);
@@ -424,6 +425,16 @@ log "Redis Object Cache aktiviert"
 # ── FluentSMTP (E-Mail-Versand) ───────────────────────────────────────────
 sudo -u "$SYSTEM_USER" wp plugin install fluent-smtp --activate --path="$SITE_PATH" --allow-root
 log "FluentSMTP installiert (→ SMTP-Zugangsdaten in WP-Admin → FluentSMTP eintragen)"
+
+# ── SEOpress ──────────────────────────────────────────────────────────────
+sudo -u "$SYSTEM_USER" wp plugin install seopress --activate --path="$SITE_PATH" --allow-root
+SEOPRESS_PRO_ZIP="/etc/wp-hosting/plugins/seopress-pro.zip"
+if [[ -f "$SEOPRESS_PRO_ZIP" ]]; then
+    sudo -u "$SYSTEM_USER" wp plugin install "$SEOPRESS_PRO_ZIP" --activate --path="$SITE_PATH" --allow-root
+    log "SEOpress + SEOpress Pro installiert"
+else
+    log "SEOpress installiert (Pro ZIP nicht gefunden → /etc/wp-hosting/plugins/seopress-pro.zip)"
+fi
 
 # ── FAZ Cookie Manager (DSGVO Cookie Consent) ────────────────────────────
 FAZ_URL=$(curl -s https://api.github.com/repos/fabiodalez-dev/FAZ-Cookie-Manager/releases/latest \
