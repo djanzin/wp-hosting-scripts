@@ -190,9 +190,8 @@ sudo bash maintenance.sh
 | 🟡 Disk Warnung | Partition > 80% belegt | Webhook (stündlich) |
 | 🔴 Disk Kritisch | Partition > 90% belegt | Webhook (stündlich) |
 | 🟢 Disk OK | Partition wieder < 80% | Webhook (Recovery) |
-| 🟡 SSL Warnung | Zertifikat läuft in < 30 Tagen ab | Webhook (täglich 07:00) |
-| 🔴 SSL Kritisch | Zertifikat läuft in < 7 Tagen ab | Webhook (täglich 07:00) |
-| 🟢 SSL Erneuert | Zertifikat wieder > 30 Tage gültig | Webhook (Recovery) |
+| 🔴 SSL Fehler | Zertifikat läuft in < 2 Tagen ab (Erneuerung fehlgeschlagen) | Webhook (alle 6h) |
+| 🟢 SSL OK | Zertifikat nach Fehler erfolgreich erneuert | Webhook (Recovery) |
 | Auto-Update | Wöchentlicher Update-Lauf abgeschlossen | Webhook (sonntags 03:00) |
 
 Alle Alerts nutzen state-tracking — kein Spam, nur bei Zustandsänderung.

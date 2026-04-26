@@ -778,15 +778,15 @@ log "Disk Space Alert eingerichtet (stündlich → Webhook bei >80% / >90%)"
 # ── SSL Certificate Monitor ───────────────────────────────────────────────
 cat > /usr/local/bin/ssl-monitor.sh <<'SSLEOF'
 #!/bin/bash
-# SSL Certificate Monitor — täglich via Cron
-# Prüft alle installierten Domains und sendet Webhook bei ablaufenden Certs.
+# SSL Certificate Monitor — alle 6 Stunden via Cron
+# Nur Alert wenn Zertifikat-Erneuerung fehlgeschlagen ist (< 2 Tage).
+# Optimiert für NPMplus mit Let's Encrypt Short-Lived Certificates (6 Tage).
 set -euo pipefail
 
 source /etc/wp-hosting/config 2>/dev/null || exit 0
 [[ -z "${WEBHOOK_URL:-}" ]] && exit 0
 
-WARN_DAYS=30    # Warnung wenn < 30 Tage bis Ablauf
-CRIT_DAYS=7     # Kritisch wenn < 7 Tage bis Ablauf
+CRIT_DAYS=2     # Alert wenn < 2 Tage — Erneuerung definitiv fehlgeschlagen
 SITES_DIR="/etc/wp-hosting/sites"
 STATE_DIR="/var/lib/wp-hosting/ssl-state"
 mkdir -p "$STATE_DIR"
@@ -794,11 +794,10 @@ mkdir -p "$STATE_DIR"
 [[ -z "$(ls -A "$SITES_DIR" 2>/dev/null)" ]] && exit 0
 
 send_webhook() {
-    local emoji="$1" level="$2" domain="$3" days="$4"
-    local msg="${emoji} SSL ${level}: ${domain} | Zertifikat läuft ab in ${days} Tagen"
+    local emoji="$1" msg="$2"
     curl -fsS -X POST \
         -H "Content-Type: application/json" \
-        -d "{\"content\":\"${msg}\",\"text\":\"${msg}\"}" \
+        -d "{\"content\":\"${emoji} ${msg}\",\"text\":\"${emoji} ${msg}\"}" \
         "${WEBHOOK_URL}" -o /dev/null 2>/dev/null || true
 }
 
@@ -820,23 +819,24 @@ for cred_file in "${SITES_DIR}"/*.txt; do
     state_file="${STATE_DIR}/${domain}"
     last=$(cat "$state_file" 2>/dev/null || echo "ok")
 
-    if   [[ $days_left -le $CRIT_DAYS ]]; then
-        [[ "$last" != "crit" ]] && send_webhook "🔴" "KRITISCH" "$domain" "$days_left"
+    if [[ $days_left -le $CRIT_DAYS ]]; then
+        # Nur alert wenn noch nicht gemeldet (kein Spam alle 6h)
+        [[ "$last" != "crit" ]] && \
+            send_webhook "🔴" "SSL Erneuerung fehlgeschlagen: ${domain} | Läuft ab in ${days_left} Tag(en) — sofort NPMplus prüfen!"
         echo "crit" > "$state_file"
-    elif [[ $days_left -le $WARN_DAYS ]]; then
-        [[ "$last" == "ok"   ]] && send_webhook "🟡" "WARNUNG"  "$domain" "$days_left"
-        echo "warn" > "$state_file"
     else
-        [[ "$last" != "ok"   ]] && send_webhook "🟢" "Erneuert" "$domain" "$days_left"
-        echo "ok"   > "$state_file"
+        # Recovery: Zertifikat wurde erfolgreich erneuert
+        [[ "$last" == "crit" ]] && \
+            send_webhook "🟢" "SSL OK: ${domain} | Zertifikat erneuert, noch ${days_left} Tage gültig"
+        echo "ok" > "$state_file"
     fi
 done
 SSLEOF
 
 chmod +x /usr/local/bin/ssl-monitor.sh
-echo "0 7 * * * root /usr/local/bin/ssl-monitor.sh" > /etc/cron.d/ssl-monitor
+echo "0 */6 * * * root /usr/local/bin/ssl-monitor.sh" > /etc/cron.d/ssl-monitor
 mkdir -p /var/lib/wp-hosting/ssl-state
-log "SSL Monitor eingerichtet (täglich 07:00 → Webhook bei <30 / <7 Tage)"
+log "SSL Monitor eingerichtet (alle 6h → Alert nur bei Erneuerungsfehler <2 Tage)"
 
 # Konfiguration speichern
 mkdir -p /etc/wp-hosting/plugins
@@ -881,7 +881,7 @@ echo -e "  Konfiguration: ${BOLD}/etc/wp-hosting/config${NC}"
 echo -e "  Sites:         ${BOLD}/etc/wp-hosting/sites/<domain>.txt${NC}"
 echo -e "  Datei-Backup:  ${BOLD}${BACKUP_LOCAL}${NC} (täglich 02:00)"
 echo -e "  Disk Alert:    ${BOLD}/usr/local/bin/disk-alert.sh${NC} (stündlich, Webhook bei >80%/>90%)"
-echo -e "  SSL Monitor:   ${BOLD}/usr/local/bin/ssl-monitor.sh${NC} (täglich 07:00, Webhook bei <30/<7 Tage)"
+echo -e "  SSL Monitor:   ${BOLD}/usr/local/bin/ssl-monitor.sh${NC} (alle 6h, Alert nur bei Erneuerungsfehler)"
 [[ -n "${RCLONE_REMOTE:-}" ]] && \
     echo -e "  Remote-Backup: ${BOLD}${RCLONE_DEST}${NC}"
 echo ""
