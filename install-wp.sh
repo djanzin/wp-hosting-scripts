@@ -756,6 +756,82 @@ MUPLUGIN
     log "Must-Use Plugin: Digital Checkout Consent (Widerrufsrecht-Checkbox)"
 fi
 
+# ── Must-Use Plugin: Maintenance Mode ────────────────────────────────────
+cat > "${SITE_PATH}/wp-content/mu-plugins/maintenance-mode.php" <<'MUPLUGIN'
+<?php
+/**
+ * Maintenance Mode
+ *
+ * Aktivieren:   touch wp-content/.maintenance-active
+ * Deaktivieren: rm wp-content/.maintenance-active
+ *
+ * Eingeloggte User (Admin) sehen die Seite immer normal.
+ * wp-login.php ist immer erreichbar.
+ */
+
+$_wph_flag = dirname( __FILE__ ) . '/../.maintenance-active';
+
+if ( ! file_exists( $_wph_flag ) ) {
+    return;
+}
+
+// wp-login.php immer durchlassen
+if ( isset( $_SERVER['REQUEST_URI'] ) &&
+     strpos( $_SERVER['REQUEST_URI'], 'wp-login.php' ) !== false ) {
+    return;
+}
+
+// Eingeloggte User durchlassen (Cookie-Check vor WordPress-Init)
+foreach ( array_keys( $_COOKIE ) as $_wph_key ) {
+    if ( strpos( $_wph_key, 'wordpress_logged_in_' ) === 0 ) {
+        return;
+    }
+}
+
+http_response_code( 503 );
+header( 'Retry-After: 3600' );
+header( 'Content-Type: text/html; charset=UTF-8' );
+
+$_wph_host = htmlspecialchars( $_SERVER['HTTP_HOST'] ?? '', ENT_QUOTES, 'UTF-8' );
+?><!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wartung &mdash; <?php echo $_wph_host; ?></title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+  .card { max-width: 460px; width: 100%; text-align: center; }
+  .icon { font-size: 3rem; margin-bottom: 1.5rem; }
+  h1   { font-size: 1.8rem; font-weight: 700; margin-bottom: .75rem; letter-spacing: -.02em; }
+  p    { color: #94a3b8; line-height: 1.65; font-size: .95rem; }
+  .domain { color: #38bdf8; font-size: .85rem; margin-top: 2rem; opacity: .8; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">🔧</div>
+  <h1>Wartungsarbeiten</h1>
+  <p>Diese Seite wird gerade eingerichtet<br>und ist in Kürze verfügbar.</p>
+  <p class="domain"><?php echo $_wph_host; ?></p>
+</div>
+</body>
+</html>
+<?php
+die();
+MUPLUGIN
+log "Must-Use Plugin: Maintenance Mode erstellt"
+
 # ── WP-Cron via System-Cron ───────────────────────────────────────────────
 # DISABLE_WP_CRON=true → kein Cron-Aufruf bei jedem Seitenaufruf
 echo "*/5 * * * * ${SYSTEM_USER} /usr/local/bin/wp --path=${SITE_PATH} cron event run --due-now --allow-root 2>/dev/null" \
@@ -769,6 +845,12 @@ find "$SITE_PATH" -type d -exec chmod 750 {} \;
 find "$SITE_PATH" -type f -exec chmod 640 {} \;
 chmod 600 "${SITE_PATH}/wp-config.php"
 log "Berechtigungen gesetzt"
+
+# ── Maintenance Mode aktivieren ───────────────────────────────────────────
+touch "${SITE_PATH}/wp-content/.maintenance-active"
+chown "${SYSTEM_USER}:www-data" "${SITE_PATH}/wp-content/.maintenance-active"
+chmod 640 "${SITE_PATH}/wp-content/.maintenance-active"
+log "Maintenance Mode aktiviert (→ sudo bash maintenance.sh zum Freischalten)"
 
 # ── Services neu laden ────────────────────────────────────────────────────
 nginx -t && systemctl reload nginx
@@ -896,6 +978,7 @@ echo -e "  SFTP-Pass:     ${BOLD}${SFTP_PASS}${NC}"
 echo -e "  SFTP-Pfad:     ${BOLD}/site${NC}"
 echo ""
 echo -e "${YELLOW}  → Zugangsdaten gespeichert: ${CRED_FILE}${NC}"
+echo -e "${YELLOW}  → Site ist im Maintenance Mode — freischalten: sudo bash maintenance.sh${NC}"
 echo -e "${YELLOW}  → NPM Proxy-Host für https://${DOMAIN} anlegen (→ Port 80).${NC}"
 if [[ "$SITE_TYPE" == "woocommerce" ]]; then
 echo -e "${YELLOW}  → Rechtliche Texte befüllen (Impressum, Datenschutz, AGB, Widerruf):${NC}"
