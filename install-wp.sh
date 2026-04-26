@@ -218,7 +218,15 @@ server {
         add_header               X-FastCGI-Cache \$upstream_cache_status;
     }
 
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|pdf|txt|woff|woff2|ttf|svg|webp|avif)\$ {
+    location ~* \.(jpg|jpeg|png|gif)\$ {
+        add_header Vary Accept;
+        try_files \$uri\$webp_suffix \$uri =404;
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+        log_not_found off;
+    }
+
+    location ~* \.(ico|css|js|pdf|txt|woff|woff2|ttf|svg|webp|avif)\$ {
         expires 30d;
         add_header Cache-Control "public, no-transform";
         log_not_found off;
@@ -292,7 +300,15 @@ server {
         add_header               X-FastCGI-Cache \$upstream_cache_status;
     }
 
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|pdf|txt|woff|woff2|ttf|svg|webp|avif)\$ {
+    location ~* \.(jpg|jpeg|png|gif)\$ {
+        add_header Vary Accept;
+        try_files \$uri\$webp_suffix \$uri =404;
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+        log_not_found off;
+    }
+
+    location ~* \.(ico|css|js|pdf|txt|woff|woff2|ttf|svg|webp|avif)\$ {
         expires 30d;
         add_header Cache-Control "public, no-transform";
         log_not_found off;
@@ -425,6 +441,10 @@ log "Redis Object Cache aktiviert"
 # ── FluentSMTP (E-Mail-Versand) ───────────────────────────────────────────
 sudo -u "$SYSTEM_USER" wp plugin install fluent-smtp --activate --path="$SITE_PATH" --allow-root
 log "FluentSMTP installiert (→ SMTP-Zugangsdaten in WP-Admin → FluentSMTP eintragen)"
+
+# ── WebP Bildoptimierung ──────────────────────────────────────────────────
+sudo -u "$SYSTEM_USER" wp plugin install webp-converter-for-media --activate --path="$SITE_PATH" --allow-root
+log "Converter for Media installiert (WebP-Konvertierung bei Upload)"
 
 # ── Two Factor (2FA für WP-Admin) ────────────────────────────────────────
 sudo -u "$SYSTEM_USER" wp plugin install two-factor --activate --path="$SITE_PATH" --allow-root

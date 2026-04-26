@@ -318,6 +318,15 @@ fastcgi_cache_path /var/cache/nginx/wp levels=1:2 keys_zone=WPCACHE:100m max_siz
 CACHEEOF
 log "Nginx FastCGI-Cache konfiguriert"
 
+cat > /etc/nginx/conf.d/webp.conf <<'WEBPEOF'
+# WebP: $webp_suffix wird in Vhosts für try_files genutzt
+map $http_accept $webp_suffix {
+    default  "";
+    "~*webp" ".webp";
+}
+WEBPEOF
+log "Nginx WebP-Serving konfiguriert"
+
 # Real-IP: NPM + Cloudflare IP-Ranges
 # Mit real_ip_recursive entfernt Nginx die vertrauenswürdigen IPs aus
 # X-Forwarded-For von hinten → übrig bleibt die echte Besucher-IP,
