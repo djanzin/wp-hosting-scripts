@@ -383,6 +383,12 @@ sudo -u "$SYSTEM_USER" wp option update time_format "H:i"                --path=
 sudo -u "$SYSTEM_USER" wp option update WPLANG ""                        --path="$SITE_PATH" --allow-root
 sudo -u "$SYSTEM_USER" wp rewrite structure "/%category%/%postname%/"    --path="$SITE_PATH" --allow-root
 sudo -u "$SYSTEM_USER" wp rewrite flush                                  --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp user update "$WP_ADMIN_USER" \
+    --first_name="Danijel" \
+    --last_name="Janzin" \
+    --nickname="Dany" \
+    --display_name="Dany" \
+    --path="$SITE_PATH" --allow-root
 log "Einstellungen gesetzt (Timezone: Europe/Berlin, Sprache: English, Permalinks: /%category%/%postname%/)"
 
 # ── Redis Object Cache ─────────────────────────────────────────────────────
