@@ -53,6 +53,46 @@ read -rp "IP-Adresse des Nginx Proxy Managers (für Real-IP): " NPM_IP
 read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
 
 echo ""
+echo "Remote-Backup für WordPress-Dateien (wp-content) konfigurieren?"
+echo "  1) Cloudflare R2"
+echo "  2) S3-kompatibel (AWS, MinIO, etc.)"
+echo "  3) SFTP"
+echo "  4) Überspringen (nur lokale Backups)"
+echo ""
+read -rp "Auswahl [1-4]: " RCLONE_CHOICE
+
+RCLONE_REMOTE=""
+case "$RCLONE_CHOICE" in
+    1)
+        read -rp "R2 Account-ID: " R2_ACCOUNT_ID
+        read -rp "R2 Access Key ID: " R2_KEY_ID
+        read -rsp "R2 Access Key Secret: " R2_KEY_SECRET; echo ""
+        read -rp "R2 Bucket-Name: " R2_BUCKET
+        RCLONE_REMOTE="r2"
+        RCLONE_DEST="r2:${R2_BUCKET}/wp-files"
+        ;;
+    2)
+        read -rp "S3 Region (z.B. eu-central-1): " S3_REGION
+        read -rp "S3 Bucket-Name: " S3_BUCKET
+        read -rp "S3 Access Key ID: " S3_KEY_ID
+        read -rsp "S3 Access Key Secret: " S3_KEY_SECRET; echo ""
+        read -rp "S3 Endpoint (leer = AWS Standard): " S3_ENDPOINT
+        RCLONE_REMOTE="s3backup"
+        RCLONE_DEST="s3backup:${S3_BUCKET}/wp-files"
+        ;;
+    3)
+        read -rp "SFTP Host: " SFTP_HOST
+        read -rp "SFTP User: " SFTP_USER
+        read -rp "SFTP Pfad (z.B. /backups/wp-files): " SFTP_PATH
+        read -rp "SFTP Port [22]: " SFTP_PORT; SFTP_PORT=${SFTP_PORT:-22}
+        RCLONE_REMOTE="sftpbackup"
+        RCLONE_DEST="sftpbackup:${SFTP_PATH}"
+        ;;
+    4) RCLONE_REMOTE="" ;;
+    *) warn "Ungültige Auswahl — Remote-Backup übersprungen"; RCLONE_REMOTE="" ;;
+esac
+
+echo ""
 info "VM-Typ: ${BOLD}${VM_TYPE}${NC}"
 info "DB-Host: ${BOLD}${DB_HOST}${NC}"
 echo ""
@@ -72,6 +112,56 @@ DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
     php8.3-mbstring php8.3-xml php8.3-zip php8.3-intl \
     php8.3-soap php8.3-bcmath php8.3-imagick php8.3-opcache
 log "Pakete installiert"
+
+# ── rclone installieren & konfigurieren ───────────────────────────────────
+if [[ -n "$RCLONE_REMOTE" ]]; then
+    if command -v rclone &>/dev/null; then
+        log "rclone bereits installiert ($(rclone --version 2>/dev/null | head -1))"
+    else
+        curl -fsS https://rclone.org/install.sh | bash 2>&1 | tail -3
+        log "rclone installiert"
+    fi
+
+    mkdir -p /root/.config/rclone
+    case "$RCLONE_CHOICE" in
+        1) cat >> /root/.config/rclone/rclone.conf <<EOF
+
+[r2]
+type = s3
+provider = Cloudflare
+access_key_id = ${R2_KEY_ID}
+secret_access_key = ${R2_KEY_SECRET}
+endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+acl = private
+EOF
+            ;;
+        2) cat >> /root/.config/rclone/rclone.conf <<EOF
+
+[s3backup]
+type = s3
+provider = AWS
+access_key_id = ${S3_KEY_ID}
+secret_access_key = ${S3_KEY_SECRET}
+region = ${S3_REGION}
+${S3_ENDPOINT:+endpoint = ${S3_ENDPOINT}}
+acl = private
+EOF
+            ;;
+        3) cat >> /root/.config/rclone/rclone.conf <<EOF
+
+[sftpbackup]
+type = sftp
+host = ${SFTP_HOST}
+user = ${SFTP_USER}
+port = ${SFTP_PORT}
+key_file = /root/.ssh/id_rsa
+EOF
+            warn "SFTP: SSH-Key /root/.ssh/id_rsa muss manuell auf Ziel-Server hinterlegt werden."
+            ;;
+    esac
+    chmod 600 /root/.config/rclone/rclone.conf
+    log "rclone konfiguriert (Remote: ${RCLONE_REMOTE} → ${RCLONE_DEST})"
+fi
 
 # ── Automatische Sicherheitsupdates ───────────────────────────────────────
 cat > /etc/apt/apt.conf.d/50unattended-upgrades-wp <<'EOF'
@@ -558,6 +648,69 @@ AUEOF
     log "Auto-Update-Cron aktiviert (sonntags 03:00 → /var/log/wp-auto-update.log)"
 fi
 
+# ── WordPress Datei-Backup Script ────────────────────────────────────────
+BACKUP_LOCAL="/var/backups/wp-files"
+mkdir -p "$BACKUP_LOCAL"
+
+cat > /usr/local/bin/wp-backup-files.sh <<BACKUPEOF
+#!/bin/bash
+# WordPress wp-content Datei-Backup (täglich 02:00)
+set -euo pipefail
+
+SITES_DIR="/etc/wp-hosting/sites"
+BACKUP_DIR="${BACKUP_LOCAL}"
+RCLONE_DEST="${RCLONE_REMOTE:+${RCLONE_DEST}}"
+RETENTION_DAYS=7
+LOG="/var/log/wp-backup-files.log"
+DATE=\$(date '+%Y-%m-%d')
+ERRORS=0
+
+mkdir -p "\$BACKUP_DIR"
+echo "[\$(date '+%Y-%m-%d %H:%M')] Datei-Backup gestartet" >> "\$LOG"
+
+for f in "\${SITES_DIR}"/*.txt; do
+    [[ -f "\$f" ]] || continue
+    DOMAIN=\$(basename "\$f" .txt)
+    SITE_PATH="/var/www/\${DOMAIN}"
+    CONTENT_PATH="\${SITE_PATH}/wp-content"
+
+    [[ -d "\$CONTENT_PATH" ]] || continue
+
+    ARCHIVE="\${BACKUP_DIR}/\${DOMAIN}_\${DATE}.tar.gz"
+
+    if tar -czf "\$ARCHIVE" \
+        --exclude="\${CONTENT_PATH}/cache" \
+        --exclude="\${CONTENT_PATH}/upgrade" \
+        --exclude="\${CONTENT_PATH}/wflogs" \
+        -C "\$SITE_PATH" wp-content 2>/dev/null; then
+        SIZE=\$(du -sh "\$ARCHIVE" 2>/dev/null | cut -f1)
+        echo "[\$(date '+%Y-%m-%d %H:%M')] OK \${DOMAIN} (\${SIZE})" >> "\$LOG"
+    else
+        echo "[\$(date '+%Y-%m-%d %H:%M')] FEHLER \${DOMAIN}" >> "\$LOG"
+        ERRORS=\$((ERRORS + 1))
+    fi
+done
+
+# Remote-Sync
+if [[ -n "\${RCLONE_DEST:-}" ]] && command -v rclone &>/dev/null; then
+    if rclone sync "\$BACKUP_DIR" "\$RCLONE_DEST" --include "*_\${DATE}.tar.gz" 2>/dev/null; then
+        echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Sync OK → \${RCLONE_DEST}" >> "\$LOG"
+    else
+        echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Sync FEHLER" >> "\$LOG"
+        ERRORS=\$((ERRORS + 1))
+    fi
+fi
+
+# Alte lokale Backups löschen
+find "\$BACKUP_DIR" -name "*.tar.gz" -mtime +\${RETENTION_DAYS} -delete 2>/dev/null || true
+
+echo "[\$(date '+%Y-%m-%d %H:%M')] Datei-Backup abgeschlossen (Fehler: \${ERRORS})" >> "\$LOG"
+BACKUPEOF
+
+chmod +x /usr/local/bin/wp-backup-files.sh
+echo "0 2 * * * root /usr/local/bin/wp-backup-files.sh" > /etc/cron.d/wp-backup-files
+log "Datei-Backup eingerichtet (täglich 02:00 → ${BACKUP_LOCAL})"
+
 # Konfiguration speichern
 cat > /etc/wp-hosting/config <<EOF
 VM_TYPE=${VM_TYPE}
@@ -567,6 +720,8 @@ DB_ADMIN_PASS=${DB_ADMIN_PASS}
 WP_ADMIN_EMAIL=${WP_ADMIN_EMAIL}
 NPM_IP=${NPM_IP}
 WEBHOOK_URL=${WEBHOOK_URL:-}
+RCLONE_REMOTE=${RCLONE_REMOTE:-}
+RCLONE_DEST=${RCLONE_DEST:-}
 EOF
 chmod 600 /etc/wp-hosting/config
 
@@ -594,6 +749,9 @@ echo ""
 echo -e "  Netdata:       ${BOLD}http://$(hostname -I | awk '{print $1}'):19999${NC}"
 echo -e "  Konfiguration: ${BOLD}/etc/wp-hosting/config${NC}"
 echo -e "  Sites:         ${BOLD}/etc/wp-hosting/sites/<domain>.txt${NC}"
+echo -e "  Datei-Backup:  ${BOLD}${BACKUP_LOCAL}${NC} (täglich 02:00)"
+[[ -n "${RCLONE_REMOTE:-}" ]] && \
+    echo -e "  Remote-Backup: ${BOLD}${RCLONE_DEST}${NC}"
 echo ""
 echo -e "${YELLOW}  → Filebrowser-Passwort notieren!${NC}"
 echo -e "${YELLOW}  → NPM Proxy-Hosts für Port 8080, 8090 und 19999 anlegen.${NC}"
