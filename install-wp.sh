@@ -362,6 +362,12 @@ define('WP_POST_REVISIONS', 5);
 define('EMPTY_TRASH_DAYS', 7);
 define('DISALLOW_FILE_EDIT', true);
 define('FORCE_SSL_ADMIN', true);
+define('WP_DEBUG', false);
+define('WP_DEBUG_LOG', false);
+define('WP_DEBUG_DISPLAY', false);
+define('WP_MEMORY_LIMIT', '256M');
+define('WP_MAX_MEMORY_LIMIT', '512M');
+define('AUTOSAVE_INTERVAL', 120);
 if (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { \$_SERVER['HTTPS'] = 'on'; }" \
     --allow-root
 
@@ -436,25 +442,31 @@ sudo -u "$SYSTEM_USER" wp option update default_ping_status "closed" \
 sudo -u "$SYSTEM_USER" wp option update default_pingback_flag "0" \
     --path="$SITE_PATH" --allow-root
 
+# Admin-E-Mail-Bestätigung deaktivieren (WordPress-Nag alle 6 Monate)
+sudo -u "$SYSTEM_USER" wp option update admin_email_lifespan "2147483647" \
+    --path="$SITE_PATH" --allow-root
+
 # Sicherheits-Dateien entfernen
 rm -f "${SITE_PATH}/readme.html" \
       "${SITE_PATH}/license.txt" \
       "${SITE_PATH}/wp-config-sample.php"
 
-# WooCommerce-Tracking + Marketing deaktivieren
+# WooCommerce-Tracking + Marketing + Einstellungen
 if [[ "$SITE_TYPE" == "woocommerce" ]]; then
-    sudo -u "$SYSTEM_USER" wp option update woocommerce_allow_tracking "no" \
-        --path="$SITE_PATH" --allow-root 2>/dev/null || true
-    sudo -u "$SYSTEM_USER" wp option update woocommerce_show_marketplace_suggestions "no" \
-        --path="$SITE_PATH" --allow-root 2>/dev/null || true
-    sudo -u "$SYSTEM_USER" wp option update woocommerce_remote_logging_enabled "no" \
-        --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_allow_tracking "no"                  --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_show_marketplace_suggestions "no"    --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_remote_logging_enabled "no"          --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_default_country "DE"                 --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_currency "EUR"                       --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_weight_unit "kg"                     --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_dimension_unit "cm"                  --path="$SITE_PATH" --allow-root 2>/dev/null || true
 fi
 
 log "Bloat entfernt (Plugins, Themes, Demo-Inhalte, Pingbacks, Sicherheitsdateien)"
 
 # ── Must-Use Plugin: Cache-Check deaktivieren ────────────────────────────
 mkdir -p "${SITE_PATH}/wp-content/mu-plugins"
+
 cat > "${SITE_PATH}/wp-content/mu-plugins/server-cache.php" <<'MUPLUGIN'
 <?php
 /**
@@ -466,7 +478,26 @@ add_filter('site_status_tests', function($tests) {
     return $tests;
 });
 MUPLUGIN
-log "Must-Use Plugin erstellt (Site Health Cache-Check deaktiviert)"
+
+cat > "${SITE_PATH}/wp-content/mu-plugins/performance.php" <<'MUPLUGIN'
+<?php
+/**
+ * Performance-Optimierungen:
+ * - Heartbeat im Frontend deaktivieren, im Admin auf 60 Sek. drosseln
+ */
+add_filter('heartbeat_settings', function($settings) {
+    $settings['interval'] = 60;
+    return $settings;
+});
+
+add_action('init', function() {
+    if (!is_admin()) {
+        wp_deregister_script('heartbeat');
+    }
+});
+MUPLUGIN
+
+log "Must-Use Plugins erstellt (Cache-Check, Heartbeat, Performance)"
 
 # ── WP-Cron via System-Cron ───────────────────────────────────────────────
 # DISABLE_WP_CRON=true → kein Cron-Aufruf bei jedem Seitenaufruf
