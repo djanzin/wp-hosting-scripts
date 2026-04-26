@@ -377,11 +377,13 @@ sudo -u "$SYSTEM_USER" wp core install \
 log "WordPress installiert"
 
 # ── WordPress-Einstellungen ────────────────────────────────────────────────
-sudo -u "$SYSTEM_USER" wp option update timezone_string "Europe/Berlin" --path="$SITE_PATH" --allow-root
-sudo -u "$SYSTEM_USER" wp option update date_format "Y-m-d"             --path="$SITE_PATH" --allow-root
-sudo -u "$SYSTEM_USER" wp option update time_format "H:i"               --path="$SITE_PATH" --allow-root
-sudo -u "$SYSTEM_USER" wp option update WPLANG ""                       --path="$SITE_PATH" --allow-root
-log "Einstellungen gesetzt (Timezone: Europe/Berlin, Sprache: English)"
+sudo -u "$SYSTEM_USER" wp option update timezone_string "Europe/Berlin"  --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update date_format "Y-m-d"              --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update time_format "H:i"                --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update WPLANG ""                        --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp rewrite structure "/%category%/%postname%/"    --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp rewrite flush                                  --path="$SITE_PATH" --allow-root
+log "Einstellungen gesetzt (Timezone: Europe/Berlin, Sprache: English, Permalinks: /%category%/%postname%/)"
 
 # ── Redis Object Cache ─────────────────────────────────────────────────────
 sudo -u "$SYSTEM_USER" wp plugin install redis-cache --activate --path="$SITE_PATH" --allow-root
