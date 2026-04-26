@@ -421,6 +421,17 @@ sudo -u "$SYSTEM_USER" wp plugin install redis-cache --activate --path="$SITE_PA
 sudo -u "$SYSTEM_USER" wp redis enable --path="$SITE_PATH" --allow-root 2>/dev/null || true
 log "Redis Object Cache aktiviert"
 
+# ── Antispam Bee (Kommentar-Spam) ─────────────────────────────────────────
+sudo -u "$SYSTEM_USER" wp plugin install antispam-bee --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update antispam_bee \
+    '{"regexp_check":1,"gravatar_check":1,"time_check":1,"country_code":"","flag_spam":0,"delete_spam":1,"spam_delete_days":7,"generate_css":0,"already_commented":0,"safe_number_chars":0,"no_comment_reason":0}' \
+    --format=json --path="$SITE_PATH" --allow-root 2>/dev/null || true
+log "Antispam Bee aktiviert"
+
+# ── Cloudflare Turnstile (Fake-Anmeldungen / Bot-Schutz) ──────────────────
+sudo -u "$SYSTEM_USER" wp plugin install simple-cloudflare-turnstile --activate --path="$SITE_PATH" --allow-root
+log "Cloudflare Turnstile installiert (→ Site Key + Secret Key in WP-Admin eintragen)"
+
 # ── Nginx Helper (FastCGI Cache-Invalidierung — für alle Site-Typen) ───────
 sudo -u "$SYSTEM_USER" wp plugin install nginx-helper --activate --path="$SITE_PATH" --allow-root
 sudo -u "$SYSTEM_USER" wp option update rt_wp_nginx_helper_options \
