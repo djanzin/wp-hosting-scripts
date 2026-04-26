@@ -446,6 +446,10 @@ sudo -u "$SYSTEM_USER" wp option update default_pingback_flag "0" \
 sudo -u "$SYSTEM_USER" wp option update admin_email_lifespan "2147483647" \
     --path="$SITE_PATH" --allow-root
 
+# WordPress-eigene Registrierungsseite deaktivieren (WooCommerce nicht betroffen)
+sudo -u "$SYSTEM_USER" wp option update users_can_register "0" \
+    --path="$SITE_PATH" --allow-root
+
 # Sicherheits-Dateien entfernen
 rm -f "${SITE_PATH}/readme.html" \
       "${SITE_PATH}/license.txt" \
