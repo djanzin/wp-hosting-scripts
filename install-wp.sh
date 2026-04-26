@@ -549,6 +549,50 @@ fi
 
 log "Bloat entfernt (Plugins, Themes, Demo-Inhalte, Pingbacks, Sicherheitsdateien)"
 
+# ── WooCommerce: Rechtliche Seiten (Digital-Only) ─────────────────────────
+if [[ "$SITE_TYPE" == "woocommerce" ]]; then
+    info "Rechtliche Seiten werden angelegt..."
+
+    IMPRESSUM_ID=$(sudo -u "$SYSTEM_USER" wp post create \
+        --post_type=page --post_title="Impressum" --post_name="impressum" \
+        --post_status=publish \
+        --post_content="<p><em>[Impressum-Text hier einfügen]</em></p><p>Empfehlung: <a href=\"https://www.it-recht-kanzlei.de\">IT-Recht Kanzlei</a></p>" \
+        --porcelain --path="$SITE_PATH" --allow-root)
+
+    DATENSCHUTZ_ID=$(sudo -u "$SYSTEM_USER" wp post create \
+        --post_type=page --post_title="Datenschutzerklaerung" --post_name="datenschutz" \
+        --post_status=publish \
+        --post_content="<p><em>[Datenschutzerklärung hier einfügen]</em></p><p>Empfehlung: <a href=\"https://www.it-recht-kanzlei.de\">IT-Recht Kanzlei</a></p>" \
+        --porcelain --path="$SITE_PATH" --allow-root)
+
+    AGB_ID=$(sudo -u "$SYSTEM_USER" wp post create \
+        --post_type=page --post_title="AGB" --post_name="agb" \
+        --post_status=publish \
+        --post_content="<p><em>[AGB hier einfügen]</em></p><p>Empfehlung: <a href=\"https://www.it-recht-kanzlei.de\">IT-Recht Kanzlei</a></p>" \
+        --porcelain --path="$SITE_PATH" --allow-root)
+
+    WIDERRUF_ID=$(sudo -u "$SYSTEM_USER" wp post create \
+        --post_type=page --post_title="Widerrufsbelehrung" --post_name="widerrufsbelehrung" \
+        --post_status=publish \
+        --post_content="<p><em>[Widerrufsbelehrung fuer digitale Gueter hier einfuegen]</em></p><p>Hinweis: Bei digitalen Produkten erlischt das Widerrufsrecht mit Beginn der Ausfuehrung (Paragraph 356 Abs. 5 BGB).</p><p>Empfehlung: <a href=\"https://www.it-recht-kanzlei.de\">IT-Recht Kanzlei</a></p>" \
+        --porcelain --path="$SITE_PATH" --allow-root)
+
+    LIEFERUNG_ID=$(sudo -u "$SYSTEM_USER" wp post create \
+        --post_type=page --post_title="Lieferung und Download" --post_name="lieferung" \
+        --post_status=publish \
+        --post_content="<p><em>[Lieferbedingungen fuer digitale Produkte hier einfuegen]</em></p><p>Digitale Produkte werden nach abgeschlossener Zahlung sofort per Download bereitgestellt.</p>" \
+        --porcelain --path="$SITE_PATH" --allow-root)
+
+    # WooCommerce/WordPress Seiten zuweisen
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_terms_page_id     "$AGB_ID"         --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp option update wp_page_for_privacy_policy    "$DATENSCHUTZ_ID" --path="$SITE_PATH" --allow-root
+
+    # Versandkostenrechner im Warenkorb ausblenden (digital = kein Versand)
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_enable_shipping_calc "no" --path="$SITE_PATH" --allow-root 2>/dev/null || true
+
+    log "Rechtliche Seiten angelegt: Impressum (${IMPRESSUM_ID}), Datenschutz (${DATENSCHUTZ_ID}), AGB (${AGB_ID}), Widerruf (${WIDERRUF_ID}), Lieferung (${LIEFERUNG_ID})"
+fi
+
 # ── Must-Use Plugin: Cache-Check deaktivieren ────────────────────────────
 mkdir -p "${SITE_PATH}/wp-content/mu-plugins"
 
@@ -607,6 +651,96 @@ add_action('init', function() {
 MUPLUGIN
 
 log "Must-Use Plugins erstellt (Cache-Check, Heartbeat, Admin-Bar, Author-Enumeration)"
+
+# ── Must-Use Plugin: Digital Checkout Consent (nur WooCommerce) ───────────
+if [[ "$SITE_TYPE" == "woocommerce" ]]; then
+    cat > "${SITE_PATH}/wp-content/mu-plugins/digital-checkout.php" <<'MUPLUGIN'
+<?php
+/**
+ * Digital Goods Checkout: Widerrufsrecht-Checkbox (§ 356 Abs. 5 BGB)
+ *
+ * Zeigt beim Checkout eine Pflicht-Checkbox an, wenn der Warenkorb
+ * downloadbare Produkte enthält. Die Zustimmung wird mit Zeitstempel
+ * in der Bestellung gespeichert (Nachweispflicht).
+ */
+
+/**
+ * Prüft ob der aktuelle Warenkorb downloadbare Produkte enthält.
+ */
+function _wph_cart_has_downloadable(): bool {
+    if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+        return false;
+    }
+    foreach ( WC()->cart->get_cart() as $item ) {
+        $product = $item['data'] ?? null;
+        if ( $product && $product->is_downloadable() ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Checkbox vor dem Bestell-Button anzeigen.
+ */
+add_action( 'woocommerce_review_order_before_submit', function () {
+    if ( ! _wph_cart_has_downloadable() ) {
+        return;
+    }
+
+    $widerruf_url = '';
+    $widerruf_page = get_page_by_path( 'widerrufsbelehrung' );
+    if ( $widerruf_page ) {
+        $widerruf_url = get_permalink( $widerruf_page->ID );
+    }
+    ?>
+    <div class="digital-withdrawal-consent" style="margin:0 0 1.2em;padding:.8em;background:#f8f8f8;border-left:3px solid #d63638;">
+        <label style="display:flex;align-items:flex-start;gap:.6em;cursor:pointer;font-size:.9em;line-height:1.4;">
+            <input type="checkbox"
+                   name="digital_withdrawal_consent"
+                   id="digital_withdrawal_consent"
+                   value="1"
+                   style="margin-top:.15em;flex-shrink:0;" />
+            <span>
+                Ich stimme ausdrücklich zu, dass mit der Ausführung des Vertrags
+                vor Ablauf der Widerrufsfrist begonnen wird. Mir ist bekannt, dass
+                mein Widerrufsrecht mit Beginn der Ausführung erlischt.
+                <?php if ( $widerruf_url ) : ?>
+                    (<a href="<?php echo esc_url( $widerruf_url ); ?>" target="_blank" rel="noopener">Widerrufsbelehrung</a>)
+                <?php endif; ?>
+            </span>
+        </label>
+    </div>
+    <?php
+} );
+
+/**
+ * Server-seitige Validierung — läuft unabhängig vom Theme.
+ */
+add_action( 'woocommerce_checkout_process', function () {
+    if ( ! _wph_cart_has_downloadable() ) {
+        return;
+    }
+    if ( empty( $_POST['digital_withdrawal_consent'] ) ) {
+        wc_add_notice(
+            'Bitte bestätige, dass du auf dein Widerrufsrecht bei digitalen Produkten verzichtest.',
+            'error'
+        );
+    }
+} );
+
+/**
+ * Zustimmung mit Zeitstempel in der Bestellung speichern.
+ */
+add_action( 'woocommerce_checkout_order_created', function ( $order ) {
+    if ( ! empty( $_POST['digital_withdrawal_consent'] ) ) {
+        $order->update_meta_data( '_digital_withdrawal_consent', current_time( 'mysql' ) );
+        $order->save();
+    }
+} );
+MUPLUGIN
+    log "Must-Use Plugin: Digital Checkout Consent (Widerrufsrecht-Checkbox)"
+fi
 
 # ── WP-Cron via System-Cron ───────────────────────────────────────────────
 # DISABLE_WP_CRON=true → kein Cron-Aufruf bei jedem Seitenaufruf
@@ -749,4 +883,8 @@ echo -e "  SFTP-Pfad:     ${BOLD}/site${NC}"
 echo ""
 echo -e "${YELLOW}  → Zugangsdaten gespeichert: ${CRED_FILE}${NC}"
 echo -e "${YELLOW}  → NPM Proxy-Host für https://${DOMAIN} anlegen (→ Port 80).${NC}"
+if [[ "$SITE_TYPE" == "woocommerce" ]]; then
+echo -e "${YELLOW}  → Rechtliche Texte befüllen (Impressum, Datenschutz, AGB, Widerruf):${NC}"
+echo -e "${YELLOW}     Empfehlung: https://www.it-recht-kanzlei.de (Digital-Paket)${NC}"
+fi
 echo ""
