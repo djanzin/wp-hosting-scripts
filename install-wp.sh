@@ -46,10 +46,19 @@ esac
 echo ""
 read -rp "WP-Admin-Zugang auf bestimmte IP beschränken? (leer = kein Limit): " ADMIN_IP
 
+# Shop-Name nur bei WooCommerce abfragen
+WOO_SHOP_NAME=""
+if [[ "$SITE_TYPE" == "woocommerce" ]]; then
+    echo ""
+    read -rp "Shop-Name für E-Mail-Versand (leer = Domain): " WOO_SHOP_NAME
+    [[ -z "$WOO_SHOP_NAME" ]] && WOO_SHOP_NAME="$DOMAIN"
+fi
+
 echo ""
 info "Domain:    ${BOLD}${DOMAIN}${NC}"
 info "Typ:       ${BOLD}${SITE_TYPE}${NC}"
-[[ -n "$ADMIN_IP" ]] && info "Admin-IP:  ${BOLD}${ADMIN_IP}${NC}"
+[[ -n "$ADMIN_IP" ]]       && info "Admin-IP:  ${BOLD}${ADMIN_IP}${NC}"
+[[ -n "$WOO_SHOP_NAME" ]]  && info "Shop-Name: ${BOLD}${WOO_SHOP_NAME}${NC}"
 echo ""
 read -rp "Installation starten? [j/N]: " confirm
 [[ "$confirm" != "j" && "$confirm" != "J" ]] && err "Abgebrochen."
@@ -545,6 +554,11 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     sudo -u "$SYSTEM_USER" wp option update woocommerce_dimension_unit "cm"                  --path="$SITE_PATH" --allow-root 2>/dev/null || true
     sudo -u "$SYSTEM_USER" wp option update woocommerce_enable_guest_checkout "yes"          --path="$SITE_PATH" --allow-root 2>/dev/null || true
     sudo -u "$SYSTEM_USER" wp option update woocommerce_enable_checkout_login_reminder "yes" --path="$SITE_PATH" --allow-root 2>/dev/null || true
+
+    # E-Mail-Absender
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_email_from_name    "${WOO_SHOP_NAME}"                                              --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_email_from_address "noreply@${DOMAIN}"                                             --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_email_footer_text  "${WOO_SHOP_NAME} | https://${DOMAIN} | Impressum: https://${DOMAIN}/impressum" --path="$SITE_PATH" --allow-root 2>/dev/null || true
 fi
 
 log "Bloat entfernt (Plugins, Themes, Demo-Inhalte, Pingbacks, Sicherheitsdateien)"
