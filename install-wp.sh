@@ -421,6 +421,10 @@ sudo -u "$SYSTEM_USER" wp plugin install redis-cache --activate --path="$SITE_PA
 sudo -u "$SYSTEM_USER" wp redis enable --path="$SITE_PATH" --allow-root 2>/dev/null || true
 log "Redis Object Cache aktiviert"
 
+# ── FluentSMTP (E-Mail-Versand) ───────────────────────────────────────────
+sudo -u "$SYSTEM_USER" wp plugin install fluent-smtp --activate --path="$SITE_PATH" --allow-root
+log "FluentSMTP installiert (→ SMTP-Zugangsdaten in WP-Admin → FluentSMTP eintragen)"
+
 # ── Antispam Bee (Kommentar-Spam) ─────────────────────────────────────────
 sudo -u "$SYSTEM_USER" wp plugin install antispam-bee --activate --path="$SITE_PATH" --allow-root
 sudo -u "$SYSTEM_USER" wp option update antispam_bee \
