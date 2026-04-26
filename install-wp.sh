@@ -425,6 +425,16 @@ log "Redis Object Cache aktiviert"
 sudo -u "$SYSTEM_USER" wp plugin install fluent-smtp --activate --path="$SITE_PATH" --allow-root
 log "FluentSMTP installiert (→ SMTP-Zugangsdaten in WP-Admin → FluentSMTP eintragen)"
 
+# ── FAZ Cookie Manager (DSGVO Cookie Consent) ────────────────────────────
+FAZ_URL=$(curl -s https://api.github.com/repos/fabiodalez-dev/FAZ-Cookie-Manager/releases/latest \
+    | grep "browser_download_url.*full\.zip" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+if [[ -n "$FAZ_URL" ]]; then
+    sudo -u "$SYSTEM_USER" wp plugin install "$FAZ_URL" --activate --path="$SITE_PATH" --allow-root
+    log "FAZ Cookie Manager installiert (→ Setup-Wizard in WP-Admin ausführen)"
+else
+    warn "FAZ Cookie Manager: GitHub-URL nicht gefunden — manuell installieren"
+fi
+
 # ── Antispam Bee (Kommentar-Spam) ─────────────────────────────────────────
 sudo -u "$SYSTEM_USER" wp plugin install antispam-bee --activate --path="$SITE_PATH" --allow-root
 sudo -u "$SYSTEM_USER" wp option update antispam_bee \
