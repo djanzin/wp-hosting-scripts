@@ -250,7 +250,7 @@ fi)
 }
 EOF
 else
-    # Standard WordPress: kein FastCGI-Cache
+    # WordPress: FastCGI-Cache (ohne WooCommerce-spezifische Bypass-Regeln)
     cat > "$NGINX_VHOST" <<EOF
 server {
     listen 80;
@@ -265,6 +265,13 @@ server {
     add_header X-Content-Type-Options "nosniff";
     add_header X-XSS-Protection "1; mode=block";
 
+    # Cache-Bypass: Admin, Login, eingeloggte User, POST-Requests
+    set \$skip_cache 0;
+    if (\$request_method = POST)                              { set \$skip_cache 1; }
+    if (\$query_string != "")                                 { set \$skip_cache 1; }
+    if (\$request_uri ~* "/wp-admin|/wp-login\.php|/feed")   { set \$skip_cache 1; }
+    if (\$http_cookie ~* "wordpress_logged_in")               { set \$skip_cache 1; }
+
     location / {
         try_files \$uri \$uri/ /index.php?\$args;
     }
@@ -274,6 +281,15 @@ server {
         fastcgi_pass unix:${SOCK};
         fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
         include fastcgi_params;
+
+        fastcgi_cache            WPCACHE;
+        fastcgi_cache_valid      200 301 302 1h;
+        fastcgi_cache_use_stale  error timeout updating http_500;
+        fastcgi_cache_lock       on;
+        fastcgi_cache_bypass     \$skip_cache;
+        fastcgi_no_cache         \$skip_cache;
+        fastcgi_cache_key        "\$scheme\$request_method\$host\$request_uri";
+        add_header               X-FastCGI-Cache \$upstream_cache_status;
     }
 
     location ~* \.(jpg|jpeg|png|gif|ico|css|js|pdf|txt|woff|woff2|ttf|svg|webp|avif)\$ {
@@ -302,7 +318,7 @@ cat <<IPEOF
 IPEOF
 else
 cat <<NOIPEOF
-    location = /wp-login.php { include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
+    location = /wp-login.php { limit_req zone=login burst=3 nodelay; include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
 NOIPEOF
 fi)
 }
@@ -365,19 +381,17 @@ sudo -u "$SYSTEM_USER" wp plugin install redis-cache --activate --path="$SITE_PA
 sudo -u "$SYSTEM_USER" wp redis enable --path="$SITE_PATH" --allow-root 2>/dev/null || true
 log "Redis Object Cache aktiviert"
 
+# ── Nginx Helper (FastCGI Cache-Invalidierung — für alle Site-Typen) ───────
+sudo -u "$SYSTEM_USER" wp plugin install nginx-helper --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update rt_wp_nginx_helper_options \
+    '{"enable_purge":"1","cache_method":"enable_fastcgi","purge_method":"get_request","enable_map":null,"enable_log":null,"log_level":"INFO","log_filesize":"5","enable_stamp":null,"purge_homepage_on_edit":"1","purge_homepage_on_del":"1","purge_archive_on_edit":"1","purge_archive_on_del":"1","purge_archive_on_new_comment":"1","purge_archive_on_deleted_comment":"1","purge_page_on_mod":"1","purge_page_on_new_comment":"1","purge_page_on_deleted_comment":"1","nginx_server_ip":"127.0.0.1","purge_url":"","redis_hostname":"127.0.0.1","redis_port":"6379","redis_prefix":"nginx-cache:"}' \
+    --format=json --path="$SITE_PATH" --allow-root 2>/dev/null || true
+log "Nginx Helper (FastCGI Cache-Invalidierung) aktiviert"
+
 # ── WooCommerce ────────────────────────────────────────────────────────────
 if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     info "WooCommerce wird installiert..."
     sudo -u "$SYSTEM_USER" wp plugin install woocommerce --activate --path="$SITE_PATH" --allow-root
-
-    # Nginx Helper für FastCGI Cache-Invalidierung
-    if [[ "$VM_TYPE" == "woocommerce" ]]; then
-        sudo -u "$SYSTEM_USER" wp plugin install nginx-helper --activate --path="$SITE_PATH" --allow-root
-        sudo -u "$SYSTEM_USER" wp option update rt_wp_nginx_helper_options \
-            '{"enable_purge":"1","cache_method":"enable_fastcgi","purge_method":"get_request","enable_map":null,"enable_log":null,"log_level":"INFO","log_filesize":"5","enable_stamp":null,"purge_homepage_on_edit":"1","purge_homepage_on_del":"1","purge_archive_on_edit":"1","purge_archive_on_del":"1","purge_archive_on_new_comment":"1","purge_archive_on_deleted_comment":"1","purge_page_on_mod":"1","purge_page_on_new_comment":"1","purge_page_on_deleted_comment":"1","nginx_server_ip":"127.0.0.1","purge_url":"","redis_hostname":"127.0.0.1","redis_port":"6379","redis_prefix":"nginx-cache:"}' \
-            --format=json --path="$SITE_PATH" --allow-root 2>/dev/null || true
-        log "Nginx Helper (Cache-Invalidierung) aktiviert"
-    fi
 
     # Deutsche Sprachdateien
     sudo -u "$SYSTEM_USER" wp language plugin install woocommerce de_DE --path="$SITE_PATH" --allow-root 2>/dev/null || true

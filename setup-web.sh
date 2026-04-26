@@ -217,16 +217,14 @@ http {
 }
 NGINXEOF
 
-# FastCGI-Cache nur auf WooCommerce-VMs
-if [[ "$VM_TYPE" == "woocommerce" ]]; then
-    mkdir -p /var/cache/nginx/wp
-    chown www-data:www-data /var/cache/nginx/wp
-    cat > /etc/nginx/conf.d/fastcgi-cache.conf <<'CACHEEOF'
-# WooCommerce FastCGI Cache
+# FastCGI-Cache für alle VM-Typen (WordPress + WooCommerce)
+mkdir -p /var/cache/nginx/wp
+chown www-data:www-data /var/cache/nginx/wp
+cat > /etc/nginx/conf.d/fastcgi-cache.conf <<'CACHEEOF'
+# WordPress / WooCommerce FastCGI Page Cache
 fastcgi_cache_path /var/cache/nginx/wp levels=1:2 keys_zone=WPCACHE:100m max_size=10g inactive=60m use_temp_path=off;
 CACHEEOF
-    log "Nginx FastCGI-Cache konfiguriert"
-fi
+log "Nginx FastCGI-Cache konfiguriert"
 
 # Real-IP: NPM + Cloudflare IP-Ranges
 # Mit real_ip_recursive entfernt Nginx die vertrauenswürdigen IPs aus
