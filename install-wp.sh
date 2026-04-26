@@ -368,6 +368,7 @@ define('WP_DEBUG_DISPLAY', false);
 define('WP_MEMORY_LIMIT', '256M');
 define('WP_MAX_MEMORY_LIMIT', '512M');
 define('AUTOSAVE_INTERVAL', 120);
+define('WP_CACHE', true);
 if (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) && \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { \$_SERVER['HTTPS'] = 'on'; }" \
     --allow-root
 
@@ -395,6 +396,24 @@ sudo -u "$SYSTEM_USER" wp user update "$WP_ADMIN_USER" \
     --nickname="Dany" \
     --display_name="Dany" \
     --path="$SITE_PATH" --allow-root
+
+# Kommentar-Einstellungen
+sudo -u "$SYSTEM_USER" wp option update require_name_email          "1"    --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update comment_moderation          "0"    --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update comment_whitelist           "1"    --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update close_comments_for_old_posts "1"  --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update close_comments_days_old     "90"  --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update default_comment_status      "open" --path="$SITE_PATH" --allow-root
+
+# Media-Größen
+sudo -u "$SYSTEM_USER" wp option update thumbnail_size_w "300"  --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update thumbnail_size_h "300"  --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update thumbnail_crop   "1"    --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update medium_size_w    "768"  --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update medium_size_h    "0"    --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update large_size_w     "1200" --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update large_size_h     "0"    --path="$SITE_PATH" --allow-root
+
 log "Einstellungen gesetzt (Timezone: Europe/Berlin, Sprache: English, Permalinks: /%category%/%postname%/)"
 
 # ── Redis Object Cache ─────────────────────────────────────────────────────
@@ -464,6 +483,8 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     sudo -u "$SYSTEM_USER" wp option update woocommerce_currency "EUR"                       --path="$SITE_PATH" --allow-root 2>/dev/null || true
     sudo -u "$SYSTEM_USER" wp option update woocommerce_weight_unit "kg"                     --path="$SITE_PATH" --allow-root 2>/dev/null || true
     sudo -u "$SYSTEM_USER" wp option update woocommerce_dimension_unit "cm"                  --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_enable_guest_checkout "yes"          --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_enable_checkout_login_reminder "yes" --path="$SITE_PATH" --allow-root 2>/dev/null || true
 fi
 
 log "Bloat entfernt (Plugins, Themes, Demo-Inhalte, Pingbacks, Sicherheitsdateien)"
@@ -486,22 +507,46 @@ MUPLUGIN
 cat > "${SITE_PATH}/wp-content/mu-plugins/performance.php" <<'MUPLUGIN'
 <?php
 /**
- * Performance-Optimierungen:
+ * Performance & Security:
  * - Heartbeat im Frontend deaktivieren, im Admin auf 60 Sek. drosseln
+ * - Admin-Bar für Nicht-Admins ausblenden
+ * - Author-Enumeration blockieren
  */
+
+// Heartbeat
 add_filter('heartbeat_settings', function($settings) {
     $settings['interval'] = 60;
     return $settings;
 });
-
 add_action('init', function() {
     if (!is_admin()) {
         wp_deregister_script('heartbeat');
     }
 });
+
+// Admin-Bar für Nicht-Admins ausblenden
+add_action('after_setup_theme', function() {
+    if (!current_user_can('manage_options')) {
+        show_admin_bar(false);
+    }
+});
+
+// Author-Enumeration blockieren
+add_action('template_redirect', function() {
+    if (is_author() && isset($_GET['author'])) {
+        wp_redirect(home_url('/'), 301);
+        exit;
+    }
+});
+add_action('init', function() {
+    if (preg_match('/\?author=([0-9]*)/i', $_SERVER['REQUEST_URI'])) {
+        wp_redirect(home_url('/'), 301);
+        exit;
+    }
+});
 MUPLUGIN
 
-log "Must-Use Plugins erstellt (Cache-Check, Heartbeat, Performance)"
+log "Must-Use Plugins erstellt (Cache-Check, Heartbeat, Admin-Bar, Author-Enumeration)"
 
 # ── WP-Cron via System-Cron ───────────────────────────────────────────────
 # DISABLE_WP_CRON=true → kein Cron-Aufruf bei jedem Seitenaufruf
