@@ -22,6 +22,8 @@ echo -e "${NC}"
 read -rp "IPs der Web-VMs, kommagetrennt (z.B. 192.168.1.10,192.168.1.11): " WEB_VM_IPS
 [[ -z "$WEB_VM_IPS" ]] && err "Mindestens eine Web-VM-IP angeben."
 
+read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
+
 echo ""
 echo "Remote-Backup für MariaDB-Dumps konfigurieren?"
 echo "  1) Cloudflare R2"
@@ -334,6 +336,63 @@ BEOF
 chmod +x /usr/local/bin/mysql-backup.sh
 echo "0 2 * * * root /usr/local/bin/mysql-backup.sh" > /etc/cron.d/mysql-backup
 log "MariaDB Backup-Cron konfiguriert (täglich 02:00 → /var/backups/mysql, 7 Tage)"
+
+# ── Disk Space Alert Script ───────────────────────────────────────────────
+mkdir -p /etc/wp-hosting /var/lib/wp-hosting/disk-state
+cat > /etc/wp-hosting/config <<CFGEOF
+WEBHOOK_URL=${WEBHOOK_URL:-}
+CFGEOF
+chmod 600 /etc/wp-hosting/config
+
+cat > /usr/local/bin/disk-alert.sh <<'ALERTEOF'
+#!/bin/bash
+# Disk Space Alert — stündlich via Cron
+set -euo pipefail
+
+source /etc/wp-hosting/config 2>/dev/null || exit 0
+[[ -z "${WEBHOOK_URL:-}" ]] && exit 0
+
+THRESHOLD_WARN=80
+THRESHOLD_CRIT=90
+HOST=$(hostname -s)
+STATE_DIR="/var/lib/wp-hosting/disk-state"
+mkdir -p "$STATE_DIR"
+
+send_webhook() {
+    local emoji="$1" level="$2" mount="$3" pct="$4" avail="$5"
+    local msg="${emoji} Disk ${level}: ${HOST} | ${mount} | ${pct}% belegt | ${avail} frei"
+    curl -fsS -X POST \
+        -H "Content-Type: application/json" \
+        -d "{\"content\":\"${msg}\",\"text\":\"${msg}\"}" \
+        "${WEBHOOK_URL}" -o /dev/null 2>/dev/null || true
+}
+
+while IFS= read -r line; do
+    mount=$(awk '{print $1}' <<< "$line")
+    pct=$(awk '{print $2}' <<< "$line" | tr -d '%')
+    avail=$(awk '{print $3}' <<< "$line")
+    [[ -z "$pct" || ! "$pct" =~ ^[0-9]+$ ]] && continue
+
+    state_file="${STATE_DIR}/$(echo "$mount" | tr '/' '_' | tr -d ' ')"
+    last=$(cat "$state_file" 2>/dev/null || echo "ok")
+
+    if   [[ $pct -ge $THRESHOLD_CRIT ]]; then
+        [[ "$last" != "crit" ]] && send_webhook "🔴" "KRITISCH" "$mount" "$pct" "$avail"
+        echo "crit" > "$state_file"
+    elif [[ $pct -ge $THRESHOLD_WARN ]]; then
+        [[ "$last" == "ok"   ]] && send_webhook "🟡" "WARNUNG"  "$mount" "$pct" "$avail"
+        echo "warn" > "$state_file"
+    else
+        [[ "$last" != "ok"   ]] && send_webhook "🟢" "OK"       "$mount" "$pct" "$avail"
+        echo "ok"   > "$state_file"
+    fi
+done < <(df --output=target,pcent,avail -h 2>/dev/null | tail -n +2 \
+    | grep -Ev "tmpfs|devtmpfs|udev|overlay|squashfs|^/run|^/dev$|^/sys")
+ALERTEOF
+
+chmod +x /usr/local/bin/disk-alert.sh
+echo "0 * * * * root /usr/local/bin/disk-alert.sh" > /etc/cron.d/disk-alert
+[[ -n "${WEBHOOK_URL:-}" ]] && log "Disk Space Alert eingerichtet (stündlich, Webhook bei >80%/>90%)" || log "Disk Space Alert eingerichtet (kein Webhook — nur lokal)"
 
 # ── Services starten ───────────────────────────────────────────────────────
 systemctl enable mariadb

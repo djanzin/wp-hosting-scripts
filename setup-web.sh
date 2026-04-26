@@ -722,6 +722,59 @@ chmod +x /usr/local/bin/wp-backup-files.sh
 echo "0 2 * * * root /usr/local/bin/wp-backup-files.sh" > /etc/cron.d/wp-backup-files
 log "Datei-Backup eingerichtet (täglich 02:00 → ${BACKUP_LOCAL})"
 
+# ── Disk Space Alert Script ───────────────────────────────────────────────
+cat > /usr/local/bin/disk-alert.sh <<'ALERTEOF'
+#!/bin/bash
+# Disk Space Alert — stündlich via Cron
+# Sendet Webhook-Alert bei vollem Speicher, Recovery-Alert wenn wieder OK.
+set -euo pipefail
+
+source /etc/wp-hosting/config 2>/dev/null || exit 0
+[[ -z "${WEBHOOK_URL:-}" ]] && exit 0
+
+THRESHOLD_WARN=80    # % belegt → Warnung
+THRESHOLD_CRIT=90    # % belegt → Kritisch
+HOST=$(hostname -s)
+STATE_DIR="/var/lib/wp-hosting/disk-state"
+mkdir -p "$STATE_DIR"
+
+send_webhook() {
+    local emoji="$1" level="$2" mount="$3" pct="$4" avail="$5"
+    local msg="${emoji} Disk ${level}: ${HOST} | ${mount} | ${pct}% belegt | ${avail} frei"
+    curl -fsS -X POST \
+        -H "Content-Type: application/json" \
+        -d "{\"content\":\"${msg}\",\"text\":\"${msg}\"}" \
+        "${WEBHOOK_URL}" -o /dev/null 2>/dev/null || true
+}
+
+while IFS= read -r line; do
+    mount=$(awk '{print $1}' <<< "$line")
+    pct=$(awk '{print $2}' <<< "$line" | tr -d '%')
+    avail=$(awk '{print $3}' <<< "$line")
+    [[ -z "$pct" || ! "$pct" =~ ^[0-9]+$ ]] && continue
+
+    state_file="${STATE_DIR}/$(echo "$mount" | tr '/' '_' | tr -d ' ')"
+    last=$(cat "$state_file" 2>/dev/null || echo "ok")
+
+    if   [[ $pct -ge $THRESHOLD_CRIT ]]; then
+        [[ "$last" != "crit" ]] && send_webhook "🔴" "KRITISCH" "$mount" "$pct" "$avail"
+        echo "crit" > "$state_file"
+    elif [[ $pct -ge $THRESHOLD_WARN ]]; then
+        [[ "$last" == "ok"   ]] && send_webhook "🟡" "WARNUNG"  "$mount" "$pct" "$avail"
+        echo "warn" > "$state_file"
+    else
+        [[ "$last" != "ok"   ]] && send_webhook "🟢" "OK"       "$mount" "$pct" "$avail"
+        echo "ok"   > "$state_file"
+    fi
+done < <(df --output=target,pcent,avail -h 2>/dev/null | tail -n +2 \
+    | grep -Ev "tmpfs|devtmpfs|udev|overlay|squashfs|^/run|^/dev$|^/sys")
+ALERTEOF
+
+chmod +x /usr/local/bin/disk-alert.sh
+echo "0 * * * * root /usr/local/bin/disk-alert.sh" > /etc/cron.d/disk-alert
+mkdir -p /var/lib/wp-hosting/disk-state
+log "Disk Space Alert eingerichtet (stündlich → Webhook bei >80% / >90%)"
+
 # Konfiguration speichern
 mkdir -p /etc/wp-hosting/plugins
 
@@ -764,6 +817,7 @@ echo -e "  Netdata:       ${BOLD}http://$(hostname -I | awk '{print $1}'):19999$
 echo -e "  Konfiguration: ${BOLD}/etc/wp-hosting/config${NC}"
 echo -e "  Sites:         ${BOLD}/etc/wp-hosting/sites/<domain>.txt${NC}"
 echo -e "  Datei-Backup:  ${BOLD}${BACKUP_LOCAL}${NC} (täglich 02:00)"
+echo -e "  Disk Alert:    ${BOLD}/usr/local/bin/disk-alert.sh${NC} (stündlich, Webhook bei >80%/${'>'}90%)"
 [[ -n "${RCLONE_REMOTE:-}" ]] && \
     echo -e "  Remote-Backup: ${BOLD}${RCLONE_DEST}${NC}"
 echo ""
