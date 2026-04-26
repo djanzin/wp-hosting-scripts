@@ -413,6 +413,46 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     log "WooCommerce installiert"
 fi
 
+# ── Bloat entfernen ───────────────────────────────────────────────────────
+# Überflüssige Plugins
+sudo -u "$SYSTEM_USER" wp plugin delete hello akismet \
+    --path="$SITE_PATH" --allow-root 2>/dev/null || true
+
+# Alte Default-Themes (twentytwentyfive bleibt als Fallback)
+for theme in twentytwentyone twentytwentytwo twentytwentythree twentytwentyfour; do
+    sudo -u "$SYSTEM_USER" wp theme delete "$theme" \
+        --path="$SITE_PATH" --allow-root 2>/dev/null || true
+done
+
+# Standard-Inhalte
+sudo -u "$SYSTEM_USER" wp post delete 1 2 --force \
+    --path="$SITE_PATH" --allow-root 2>/dev/null || true   # Hello World + Sample Page
+sudo -u "$SYSTEM_USER" wp comment delete 1 --force \
+    --path="$SITE_PATH" --allow-root 2>/dev/null || true   # Standard-Kommentar
+
+# Pingbacks / Trackbacks deaktivieren
+sudo -u "$SYSTEM_USER" wp option update default_ping_status "closed" \
+    --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update default_pingback_flag "0" \
+    --path="$SITE_PATH" --allow-root
+
+# Sicherheits-Dateien entfernen
+rm -f "${SITE_PATH}/readme.html" \
+      "${SITE_PATH}/license.txt" \
+      "${SITE_PATH}/wp-config-sample.php"
+
+# WooCommerce-Tracking + Marketing deaktivieren
+if [[ "$SITE_TYPE" == "woocommerce" ]]; then
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_allow_tracking "no" \
+        --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_show_marketplace_suggestions "no" \
+        --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    sudo -u "$SYSTEM_USER" wp option update woocommerce_remote_logging_enabled "no" \
+        --path="$SITE_PATH" --allow-root 2>/dev/null || true
+fi
+
+log "Bloat entfernt (Plugins, Themes, Demo-Inhalte, Pingbacks, Sicherheitsdateien)"
+
 # ── Must-Use Plugin: Cache-Check deaktivieren ────────────────────────────
 mkdir -p "${SITE_PATH}/wp-content/mu-plugins"
 cat > "${SITE_PATH}/wp-content/mu-plugins/server-cache.php" <<'MUPLUGIN'
