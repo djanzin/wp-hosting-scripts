@@ -739,12 +739,12 @@ STATE_DIR="/var/lib/wp-hosting/disk-state"
 mkdir -p "$STATE_DIR"
 
 send_webhook() {
-    local emoji="$1" level="$2" mount="$3" pct="$4" avail="$5"
+    local status="$1" emoji="$2" level="$3" mount="$4" pct="$5" avail="$6"
     local msg="${emoji} Disk ${level}: ${HOST} | ${mount} | ${pct}% belegt | ${avail} frei"
-    curl -fsS -X POST \
-        -H "Content-Type: application/json" \
-        -d "{\"content\":\"${msg}\",\"text\":\"${msg}\"}" \
-        "${WEBHOOK_URL}" -o /dev/null 2>/dev/null || true
+    curl -fsS -G \
+        --data-urlencode "msg=${msg}" \
+        "${WEBHOOK_URL}?status=${status}" \
+        -o /dev/null 2>/dev/null || true
 }
 
 while IFS= read -r line; do
@@ -757,13 +757,13 @@ while IFS= read -r line; do
     last=$(cat "$state_file" 2>/dev/null || echo "ok")
 
     if   [[ $pct -ge $THRESHOLD_CRIT ]]; then
-        [[ "$last" != "crit" ]] && send_webhook "🔴" "KRITISCH" "$mount" "$pct" "$avail"
+        [[ "$last" != "crit" ]] && send_webhook "down" "🔴" "KRITISCH" "$mount" "$pct" "$avail"
         echo "crit" > "$state_file"
     elif [[ $pct -ge $THRESHOLD_WARN ]]; then
-        [[ "$last" == "ok"   ]] && send_webhook "🟡" "WARNUNG"  "$mount" "$pct" "$avail"
+        [[ "$last" == "ok"   ]] && send_webhook "down" "🟡" "WARNUNG"  "$mount" "$pct" "$avail"
         echo "warn" > "$state_file"
     else
-        [[ "$last" != "ok"   ]] && send_webhook "🟢" "OK"       "$mount" "$pct" "$avail"
+        [[ "$last" != "ok"   ]] && send_webhook "up"   "🟢" "OK"       "$mount" "$pct" "$avail"
         echo "ok"   > "$state_file"
     fi
 done < <(df --output=target,pcent,avail -h 2>/dev/null | tail -n +2 \
@@ -794,11 +794,11 @@ mkdir -p "$STATE_DIR"
 [[ -z "$(ls -A "$SITES_DIR" 2>/dev/null)" ]] && exit 0
 
 send_webhook() {
-    local emoji="$1" msg="$2"
-    curl -fsS -X POST \
-        -H "Content-Type: application/json" \
-        -d "{\"content\":\"${emoji} ${msg}\",\"text\":\"${emoji} ${msg}\"}" \
-        "${WEBHOOK_URL}" -o /dev/null 2>/dev/null || true
+    local status="$1" emoji="$2" msg="$3"
+    curl -fsS -G \
+        --data-urlencode "msg=${emoji} ${msg}" \
+        "${WEBHOOK_URL}?status=${status}" \
+        -o /dev/null 2>/dev/null || true
 }
 
 for cred_file in "${SITES_DIR}"/*.txt; do
@@ -822,12 +822,12 @@ for cred_file in "${SITES_DIR}"/*.txt; do
     if [[ $days_left -le $CRIT_DAYS ]]; then
         # Nur alert wenn noch nicht gemeldet (kein Spam alle 6h)
         [[ "$last" != "crit" ]] && \
-            send_webhook "🔴" "SSL Erneuerung fehlgeschlagen: ${domain} | Läuft ab in ${days_left} Tag(en) — sofort NPMplus prüfen!"
+            send_webhook "down" "🔴" "SSL Erneuerung fehlgeschlagen: ${domain} | Läuft ab in ${days_left} Tag(en) — sofort NPMplus prüfen!"
         echo "crit" > "$state_file"
     else
         # Recovery: Zertifikat wurde erfolgreich erneuert
         [[ "$last" == "crit" ]] && \
-            send_webhook "🟢" "SSL OK: ${domain} | Zertifikat erneuert, noch ${days_left} Tage gültig"
+            send_webhook "up" "🟢" "SSL OK: ${domain} | Zertifikat erneuert, noch ${days_left} Tage gültig"
         echo "ok" > "$state_file"
     fi
 done
