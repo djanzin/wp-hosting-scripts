@@ -84,6 +84,60 @@ NGINX_VHOST="/etc/nginx/sites-available/${DOMAIN}"
 [[ -d "$SITE_PATH" ]] && err "Verzeichnis ${SITE_PATH} existiert bereits."
 [[ -f "$NGINX_VHOST" ]] && err "Nginx-Vhost für ${DOMAIN} existiert bereits."
 
+# ── Cleanup-Trap bei Fehler ───────────────────────────────────────────────
+# Wird bei set -e automatisch ausgelöst wenn ein Befehl fehlschlägt.
+# Hinterlässt keine halb-fertigen Überreste.
+_INSTALL_DONE=false
+cleanup_on_error() {
+    [[ "$_INSTALL_DONE" == "true" ]] && return
+    echo ""
+    echo -e "${RED}[✗]${NC} Installation fehlgeschlagen — räume auf..."
+
+    # Nginx-Vhost entfernen
+    rm -f "/etc/nginx/sites-enabled/${DOMAIN}"
+    rm -f "/etc/nginx/sites-available/${DOMAIN}"
+
+    # PHP-FPM Pool entfernen
+    rm -f "/etc/php/8.3/fpm/pool.d/${DOMAIN}.conf"
+
+    # WP-Cron entfernen
+    rm -f "/etc/cron.d/wpcron-${DOMAIN_SAFE}"
+
+    # SFTP Chroot unmounten und entfernen
+    SFTP_CHROOT="/var/sftp/${SYSTEM_USER}"
+    if mountpoint -q "${SFTP_CHROOT}/site" 2>/dev/null; then
+        umount "${SFTP_CHROOT}/site" 2>/dev/null || true
+    fi
+    sed -i "\|${SITE_PATH}.*${SFTP_CHROOT}/site|d" /etc/fstab 2>/dev/null || true
+    rm -rf "$SFTP_CHROOT"
+
+    # Filebrowser User entfernen
+    FB_DB="/etc/filebrowser/database.db"
+    FB_USER="${DOMAIN_SAFE:0:32}"
+    [[ -f "$FB_DB" ]] && command -v filebrowser &>/dev/null && \
+        filebrowser users rm "$FB_USER" --database "$FB_DB" 2>/dev/null || true
+
+    # Site-Verzeichnis entfernen
+    rm -rf "$SITE_PATH"
+
+    # Systemuser entfernen
+    id "$SYSTEM_USER" &>/dev/null && userdel "$SYSTEM_USER" 2>/dev/null || true
+
+    # Datenbank und User entfernen
+    WEB_VM_IP=$(hostname -I | awk '{print $1}')
+    mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" 2>/dev/null <<SQL || true
+DROP DATABASE IF EXISTS \`${DB_NAME}\`;
+DROP USER IF EXISTS '${DB_USER}'@'${WEB_VM_IP}';
+SQL
+
+    # Services neu laden
+    systemctl reload nginx 2>/dev/null || true
+    systemctl reload php8.3-fpm 2>/dev/null || true
+
+    echo -e "${YELLOW}[!]${NC} Cleanup abgeschlossen. Ursache prüfen und Installation erneut starten."
+}
+trap cleanup_on_error ERR
+
 # ── Systemuser anlegen ────────────────────────────────────────────────────
 if ! id "$SYSTEM_USER" &>/dev/null; then
     useradd -r -s /sbin/nologin -d "$SITE_PATH" "$SYSTEM_USER"
@@ -953,6 +1007,7 @@ System-User:   ${SYSTEM_USER}
 Admin-IP:      ${ADMIN_IP:-unbeschränkt}
 EOF
 chmod 600 "$CRED_FILE"
+_INSTALL_DONE=true  # Cleanup-Trap deaktivieren
 
 # ── Ausgabe ───────────────────────────────────────────────────────────────
 echo ""

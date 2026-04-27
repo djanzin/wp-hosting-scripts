@@ -173,12 +173,34 @@ wp config set DB_NAME     "$DB_NAME" --path="$SITE_PATH" --allow-root
 wp config set DB_USER     "$DB_USER" --path="$SITE_PATH" --allow-root
 wp config set DB_PASSWORD "$DB_PASS" --path="$SITE_PATH" --allow-root
 wp config set DB_HOST     "$DB_HOST" --path="$SITE_PATH" --allow-root
-wp config set WP_REDIS_HOST  "127.0.0.1" --path="$SITE_PATH" --allow-root
-wp config set WP_REDIS_PORT  "6379"      --path="$SITE_PATH" --allow-root
+
+# Redis
+wp config set WP_REDIS_HOST     "127.0.0.1" --path="$SITE_PATH" --allow-root
+wp config set WP_REDIS_PORT     "6379"       --path="$SITE_PATH" --allow-root
 wp config set WP_CACHE_KEY_SALT "${DOMAIN}:" --path="$SITE_PATH" --allow-root
-wp config set DISABLE_WP_CRON "true" --raw --path="$SITE_PATH" --allow-root
+
+# Performance & Sicherheit (analog install-wp.sh)
+wp config set DISABLE_WP_CRON      "true"  --raw --path="$SITE_PATH" --allow-root
+wp config set DISALLOW_FILE_EDIT   "true"  --raw --path="$SITE_PATH" --allow-root
+wp config set FORCE_SSL_ADMIN      "true"  --raw --path="$SITE_PATH" --allow-root
+wp config set WP_DEBUG             "false" --raw --path="$SITE_PATH" --allow-root
+wp config set WP_DEBUG_LOG         "false" --raw --path="$SITE_PATH" --allow-root
+wp config set WP_DEBUG_DISPLAY     "false" --raw --path="$SITE_PATH" --allow-root
+wp config set WP_MEMORY_LIMIT      "256M"       --path="$SITE_PATH" --allow-root
+wp config set WP_MAX_MEMORY_LIMIT  "512M"       --path="$SITE_PATH" --allow-root
+wp config set WP_POST_REVISIONS    "5"    --raw --path="$SITE_PATH" --allow-root
+wp config set EMPTY_TRASH_DAYS     "7"    --raw --path="$SITE_PATH" --allow-root
+wp config set AUTOSAVE_INTERVAL    "120"  --raw --path="$SITE_PATH" --allow-root
+wp config set WP_CACHE             "true" --raw --path="$SITE_PATH" --allow-root
+
+# X-Forwarded-Proto Fix für HTTPS hinter NPM
+if ! grep -q "HTTP_X_FORWARDED_PROTO" "${SITE_PATH}/wp-config.php"; then
+    sed -i "/<?php/a \\\nif (isset(\$_SERVER['HTTP_X_FORWARDED_PROTO']) \&\& \$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { \$_SERVER['HTTPS'] = 'on'; }" \
+        "${SITE_PATH}/wp-config.php" 2>/dev/null || true
+fi
+
 chmod 600 "${SITE_PATH}/wp-config.php"
-log "wp-config.php aktualisiert"
+log "wp-config.php aktualisiert (Sicherheit + Performance Konstanten gesetzt)"
 
 # ── URLs in DB ersetzen ───────────────────────────────────────────────────
 info "URLs werden ersetzt (${SRC_DOMAIN} → ${DOMAIN})..."

@@ -42,6 +42,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL-Terminierung)
 | `health-check.sh` | Web-VM | HTTP, PHP-FPM, DB aller Sites prüfen | Bei Bedarf |
 | `reset-wp-admin.sh` | Web-VM | WordPress-Admin-Passwort zurücksetzen | Bei Bedarf |
 | `rotate-keys.sh` | Web-VM | WordPress Security Keys rotieren | Alle 3–6 Monate |
+| `restore-wp.sh` | Web-VM | WordPress-Site aus Backup wiederherstellen | Bei Bedarf |
 | `db-backup.sh` | Datenbank-VM | Manuellen MariaDB-Dump erstellen | Bei Bedarf |
 
 ---
@@ -201,7 +202,7 @@ sudo bash maintenance.sh
 | Auto-Update | Wöchentlicher Update-Lauf abgeschlossen | Webhook (sonntags 03:00) |
 
 Alle Alerts nutzen state-tracking — kein Spam, nur bei Zustandsänderung.
-Webhook-Format kompatibel mit **Discord** und **Slack**.
+Webhook-Format: **Uptime Kuma Push Monitor** (`GET ?status=up|down&msg=…`).
 
 ---
 
@@ -263,4 +264,4 @@ sudo bash maintenance.sh
 - Nginx Proxy Manager (SSL-Terminierung)
 - Cloudflare (empfohlen, für Real-IP-Header)
 - VMs können sich gegenseitig per IP erreichen
-- Für Webhooks: Discord- oder Slack-Webhook-URL
+- Für Webhooks: Uptime Kuma Push Monitor URL (`https://…/api/push/<key>`)

@@ -327,43 +327,60 @@ map $http_accept $webp_suffix {
 WEBPEOF
 log "Nginx WebP-Serving konfiguriert"
 
-# Real-IP: NPM + Cloudflare IP-Ranges
+# Real-IP: NPM + Cloudflare IP-Ranges (dynamisch von cloudflare.com)
 # Mit real_ip_recursive entfernt Nginx die vertrauenswürdigen IPs aus
 # X-Forwarded-For von hinten → übrig bleibt die echte Besucher-IP,
 # die dann für Rate-Limiting und Logs verwendet wird.
-cat > /etc/nginx/conf.d/real-ip.conf <<EOF
-# Nginx Proxy Manager (interner Proxy)
-set_real_ip_from ${NPM_IP};
+CF_IPS_V4=$(curl -sf --max-time 10 https://www.cloudflare.com/ips-v4 || true)
+CF_IPS_V6=$(curl -sf --max-time 10 https://www.cloudflare.com/ips-v6 || true)
 
-# Cloudflare IPv4-Ranges (https://www.cloudflare.com/ips/)
-set_real_ip_from 103.21.244.0/22;
-set_real_ip_from 103.22.200.0/22;
-set_real_ip_from 103.31.4.0/22;
-set_real_ip_from 104.16.0.0/13;
-set_real_ip_from 104.24.0.0/14;
-set_real_ip_from 108.162.192.0/18;
-set_real_ip_from 131.0.72.0/22;
-set_real_ip_from 141.101.64.0/18;
-set_real_ip_from 162.158.0.0/15;
-set_real_ip_from 172.64.0.0/13;
-set_real_ip_from 173.245.48.0/20;
-set_real_ip_from 188.114.96.0/20;
-set_real_ip_from 190.93.240.0/20;
-set_real_ip_from 197.234.240.0/22;
-set_real_ip_from 198.41.128.0/17;
+# Fallback auf bekannte Ranges wenn Abruf fehlschlägt
+if [[ -z "$CF_IPS_V4" ]]; then
+    warn "Cloudflare IPv4-Ranges konnten nicht abgerufen werden — Fallback auf hardcodierte Ranges"
+    CF_IPS_V4="103.21.244.0/22
+103.22.200.0/22
+103.31.4.0/22
+104.16.0.0/13
+104.24.0.0/14
+108.162.192.0/18
+131.0.72.0/22
+141.101.64.0/18
+162.158.0.0/15
+172.64.0.0/13
+173.245.48.0/20
+188.114.96.0/20
+190.93.240.0/20
+197.234.240.0/22
+198.41.128.0/17"
+fi
+if [[ -z "$CF_IPS_V6" ]]; then
+    warn "Cloudflare IPv6-Ranges konnten nicht abgerufen werden — Fallback auf hardcodierte Ranges"
+    CF_IPS_V6="2400:cb00::/32
+2606:4700::/32
+2803:f800::/32
+2405:b500::/32
+2405:8100::/32
+2a06:98c0::/29
+2c0f:f248::/32"
+fi
 
-# Cloudflare IPv6-Ranges
-set_real_ip_from 2400:cb00::/32;
-set_real_ip_from 2606:4700::/32;
-set_real_ip_from 2803:f800::/32;
-set_real_ip_from 2405:b500::/32;
-set_real_ip_from 2405:8100::/32;
-set_real_ip_from 2a06:98c0::/29;
-set_real_ip_from 2c0f:f248::/32;
-
-real_ip_header    X-Forwarded-For;
-real_ip_recursive on;
-EOF
+{
+    echo "# Nginx Proxy Manager (interner Proxy)"
+    echo "set_real_ip_from ${NPM_IP};"
+    echo ""
+    echo "# Cloudflare IPv4-Ranges (https://www.cloudflare.com/ips/)"
+    while IFS= read -r ip; do
+        [[ -n "$ip" ]] && echo "set_real_ip_from ${ip};"
+    done <<< "$CF_IPS_V4"
+    echo ""
+    echo "# Cloudflare IPv6-Ranges"
+    while IFS= read -r ip; do
+        [[ -n "$ip" ]] && echo "set_real_ip_from ${ip};"
+    done <<< "$CF_IPS_V6"
+    echo ""
+    echo "real_ip_header    X-Forwarded-For;"
+    echo "real_ip_recursive on;"
+} > /etc/nginx/conf.d/real-ip.conf
 
 rm -f /etc/nginx/sites-enabled/default
 log "Nginx konfiguriert"
@@ -503,6 +520,13 @@ After=network.target
 ExecStart=/usr/local/bin/filebrowser --config /etc/filebrowser/settings.json --database /etc/filebrowser/database.db
 Restart=on-failure
 User=root
+
+# Systemd-Härtung: root auf notwendige Pfade beschränken
+ProtectSystem=strict
+ReadWritePaths=/var/www /etc/filebrowser /tmp
+ProtectHome=true
+NoNewPrivileges=yes
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
@@ -864,6 +888,44 @@ echo "0 */6 * * * root /usr/local/bin/ssl-monitor.sh" > /etc/cron.d/ssl-monitor
 mkdir -p /var/lib/wp-hosting/ssl-state
 log "SSL Monitor eingerichtet (alle 6h → Alert nur bei Erneuerungsfehler <2 Tage)"
 
+# ── Cloudflare IP Auto-Update ─────────────────────────────────────────────
+cat > /usr/local/bin/cf-ip-update.sh <<'CFEOF'
+#!/bin/bash
+# Aktualisiert Cloudflare IP-Ranges in nginx real-ip.conf
+set -euo pipefail
+
+source /etc/wp-hosting/config 2>/dev/null || true
+
+CF_IPS_V4=$(curl -sf --max-time 10 https://www.cloudflare.com/ips-v4 || true)
+CF_IPS_V6=$(curl -sf --max-time 10 https://www.cloudflare.com/ips-v6 || true)
+
+[[ -z "$CF_IPS_V4" || -z "$CF_IPS_V6" ]] && exit 0  # Abruf fehlgeschlagen – nichts überschreiben
+
+{
+    echo "# Nginx Proxy Manager (interner Proxy)"
+    echo "set_real_ip_from ${NPM_IP};"
+    echo ""
+    echo "# Cloudflare IPv4-Ranges (https://www.cloudflare.com/ips/)"
+    while IFS= read -r ip; do
+        [[ -n "$ip" ]] && echo "set_real_ip_from ${ip};"
+    done <<< "$CF_IPS_V4"
+    echo ""
+    echo "# Cloudflare IPv6-Ranges"
+    while IFS= read -r ip; do
+        [[ -n "$ip" ]] && echo "set_real_ip_from ${ip};"
+    done <<< "$CF_IPS_V6"
+    echo ""
+    echo "real_ip_header    X-Forwarded-For;"
+    echo "real_ip_recursive on;"
+} > /etc/nginx/conf.d/real-ip.conf
+
+nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
+CFEOF
+
+chmod +x /usr/local/bin/cf-ip-update.sh
+echo "0 4 * * 1 root /usr/local/bin/cf-ip-update.sh" > /etc/cron.d/cf-ip-update
+log "Cloudflare IP Auto-Update eingerichtet (montags 04:00 Uhr)"
+
 # Konfiguration speichern
 mkdir -p /etc/wp-hosting/plugins
 
@@ -878,6 +940,7 @@ WEBHOOK_URL=${WEBHOOK_URL:-}
 RCLONE_REMOTE=${RCLONE_REMOTE:-}
 RCLONE_DEST=${RCLONE_DEST:-}
 SEOPRESS_KEY=${SEOPRESS_KEY:-}
+PMA_AUTH_PASS=${PMA_AUTH_PASS}
 EOF
 chmod 600 /etc/wp-hosting/config
 
