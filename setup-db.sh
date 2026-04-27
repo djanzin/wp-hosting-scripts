@@ -311,6 +311,7 @@ KEEP_DAYS=7
 LOG="/var/log/mysql-backup.log"
 OUTFILE="\${BACKUP_DIR}/all-databases_\${DATE}.sql.gz"
 RCLONE_DEST="${RCLONE_DEST_CFG}"
+ERRORS=0
 
 echo "[\$(date '+%Y-%m-%d %H:%M')] Backup gestartet" >> "\$LOG"
 if mysqldump --all-databases --single-transaction --quick --lock-tables=false \
@@ -325,13 +326,23 @@ if mysqldump --all-databases --single-transaction --quick --lock-tables=false \
             echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Upload OK → \${RCLONE_DEST}" >> "\$LOG"
         else
             echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Upload FEHLER!" >> "\$LOG"
+            ERRORS=\$((ERRORS + 1))
         fi
     fi
 else
     echo "[\$(date '+%Y-%m-%d %H:%M')] FEHLER beim Backup!" >> "\$LOG"
+    ERRORS=\$((ERRORS + 1))
 fi
 
 find "\$BACKUP_DIR" -name "*.sql.gz" -mtime +\${KEEP_DAYS} -delete
+
+# Webhook bei Fehler
+source /etc/wp-hosting/config 2>/dev/null || true
+if [[ \${ERRORS} -gt 0 ]] && [[ -n "\${WEBHOOK_URL:-}" ]]; then
+    MSG="Backup FEHLER: MariaDB-Backup fehlgeschlagen — \$(hostname -s)"
+    curl -fsS -G --data-urlencode "msg=\${MSG}" "\${WEBHOOK_URL}?status=down" \
+        -o /dev/null 2>/dev/null || true
+fi
 BEOF
 chmod +x /usr/local/bin/mysql-backup.sh
 echo "0 2 * * * root /usr/local/bin/mysql-backup.sh" > /etc/cron.d/mysql-backup

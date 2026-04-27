@@ -388,13 +388,15 @@ EOF
 log "Log-Rotation konfiguriert (14 Tage, täglich komprimiert)"
 
 # ── phpMyAdmin ────────────────────────────────────────────────────────────
-PMA_VERSION="5.2.2"
 PMA_DIR="/var/www/phpmyadmin"
 
 if [[ -f "${PMA_DIR}/index.php" ]]; then
     log "phpMyAdmin bereits installiert"
 else
     info "phpMyAdmin wird installiert..."
+    PMA_VERSION=$(curl -sf https://www.phpmyadmin.net/home_page/version.txt | head -1 | tr -d '[:space:]')
+    [[ -z "$PMA_VERSION" ]] && PMA_VERSION="5.2.2" && warn "phpMyAdmin-Version konnte nicht abgerufen werden — Fallback: 5.2.2"
+    info "phpMyAdmin Version: ${PMA_VERSION}"
     wget -q "https://files.phpmyadmin.net/phpMyAdmin/${PMA_VERSION}/phpMyAdmin-${PMA_VERSION}-all-languages.tar.gz" -O /tmp/pma.tar.gz
     tar -xzf /tmp/pma.tar.gz -C /tmp/
     rm -rf "$PMA_DIR"
@@ -422,6 +424,13 @@ mkdir -p /tmp/phpmyadmin
 chown www-data:www-data /tmp/phpmyadmin
 chown -R www-data:www-data "$PMA_DIR"
 
+# Basic-Auth für phpMyAdmin (zweiter Schutzwall vor dem phpMyAdmin-Login)
+PMA_AUTH_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20) || true
+PMA_AUTH_HASH=$(openssl passwd -apr1 "$PMA_AUTH_PASS")
+echo "admin:${PMA_AUTH_HASH}" > /etc/nginx/.pma_htpasswd
+chmod 640 /etc/nginx/.pma_htpasswd
+chown root:www-data /etc/nginx/.pma_htpasswd
+
 cat > /etc/nginx/sites-available/phpmyadmin <<EOF
 server {
     listen 8080;
@@ -431,6 +440,9 @@ server {
 
     access_log /var/log/nginx/phpmyadmin.access.log;
     error_log  /var/log/nginx/phpmyadmin.error.log;
+
+    auth_basic "phpMyAdmin";
+    auth_basic_user_file /etc/nginx/.pma_htpasswd;
 
     location / {
         try_files \$uri \$uri/ /index.php?\$args;
@@ -449,7 +461,7 @@ server {
 }
 EOF
 ln -sf /etc/nginx/sites-available/phpmyadmin /etc/nginx/sites-enabled/
-log "phpMyAdmin installiert (Port 8080 → DB: ${DB_HOST})"
+log "phpMyAdmin installiert (Port 8080 → DB: ${DB_HOST}, Basic-Auth: admin)"
 
 # ── Filebrowser ───────────────────────────────────────────────────────────
 if command -v filebrowser &>/dev/null; then
@@ -716,6 +728,14 @@ fi
 find "\$BACKUP_DIR" -name "*.tar.gz" -mtime +\${RETENTION_DAYS} -delete 2>/dev/null || true
 
 echo "[\$(date '+%Y-%m-%d %H:%M')] Datei-Backup abgeschlossen (Fehler: \${ERRORS})" >> "\$LOG"
+
+# Webhook bei Fehler
+source /etc/wp-hosting/config 2>/dev/null || true
+if [[ \${ERRORS} -gt 0 ]] && [[ -n "\${WEBHOOK_URL:-}" ]]; then
+    MSG="Backup FEHLER: \${ERRORS} Fehler beim WP-Datei-Backup — \$(hostname -s)"
+    curl -fsS -G --data-urlencode "msg=\${MSG}" "\${WEBHOOK_URL}?status=down" \
+        -o /dev/null 2>/dev/null || true
+fi
 BACKUPEOF
 
 chmod +x /usr/local/bin/wp-backup-files.sh
@@ -872,6 +892,8 @@ echo ""
 echo -e "  VM-Typ:        ${BOLD}${VM_TYPE}${NC}"
 echo -e "  DB-Host:       ${BOLD}${DB_HOST}${NC}"
 echo -e "  phpMyAdmin:    ${BOLD}http://$(hostname -I | awk '{print $1}'):8080${NC}"
+echo -e "  PMA Benutzer:  ${BOLD}admin${NC}"
+echo -e "  PMA Passwort:  ${BOLD}${PMA_AUTH_PASS}${NC}  (Basic-Auth)"
 echo -e "  Filebrowser:   ${BOLD}http://$(hostname -I | awk '{print $1}'):8090${NC}"
 echo -e "  FB Benutzer:   ${BOLD}admin${NC}"
 echo -e "  FB Passwort:   ${BOLD}${FB_ADMIN_PASS}${NC}"
@@ -885,7 +907,7 @@ echo -e "  SSL Monitor:   ${BOLD}/usr/local/bin/ssl-monitor.sh${NC} (alle 6h, Al
 [[ -n "${RCLONE_REMOTE:-}" ]] && \
     echo -e "  Remote-Backup: ${BOLD}${RCLONE_DEST}${NC}"
 echo ""
-echo -e "${YELLOW}  → Filebrowser-Passwort notieren!${NC}"
+echo -e "${YELLOW}  → phpMyAdmin- und Filebrowser-Passwort notieren!${NC}"
 [[ -n "${SEOPRESS_KEY:-}" ]] && \
     echo -e "${YELLOW}  → SEOpress Pro ZIP hochladen: scp wp-seopress-pro-*.zip root@$(hostname -I | awk '{print $1}'):/etc/wp-hosting/plugins/seopress-pro.zip${NC}"
 echo -e "${YELLOW}  → NPM Proxy-Hosts für Port 8080, 8090 und 19999 anlegen.${NC}"
