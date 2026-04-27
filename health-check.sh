@@ -25,6 +25,12 @@ echo "║   WordPress Health Check                     ║"
 echo "╚══════════════════════════════════════════════╝"
 echo -e "${NC}"
 
+# ── Initialisierung der Zähler ────────────────────────────────────────────
+declare -a INFRA_ISSUES=()
+declare -a SITE_ISSUES=()
+OK_COUNT=0
+WARN_COUNT=0
+
 # ── Infrastruktur-Checks ──────────────────────────────────────────────────
 echo -e "${BOLD}── Infrastruktur ──────────────────────────────${NC}"
 
@@ -63,12 +69,6 @@ fi
 
 echo ""
 
-# ── Initialisierung der Zähler ────────────────────────────────────────────
-declare -a INFRA_ISSUES=()
-declare -a SITE_ISSUES=()
-OK_COUNT=0
-WARN_COUNT=0
-
 # ── Prüfung wenn keine Sites vorhanden ───────────────────────────────────
 if [[ -z "$(ls -A "$SITES_DIR" 2>/dev/null)" ]]; then
     info "Keine installierten Sites gefunden."
@@ -101,6 +101,9 @@ for f in "${SITES_DIR}"/*.txt; do
 
     if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "301" || "$HTTP_CODE" == "302" ]]; then
         HTTP_STATUS="${GREEN}${HTTP_CODE}${NC}"
+    elif [[ "$HTTP_CODE" == "503" ]] && \
+         [[ -f "/var/www/${DOMAIN}/wp-content/.maintenance-active" ]]; then
+        HTTP_STATUS="${YELLOW}MAINT${NC}"
     else
         HTTP_STATUS="${RED}${HTTP_CODE}${NC}"
         SITE_OK=false

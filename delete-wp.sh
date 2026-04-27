@@ -118,8 +118,14 @@ fi
 rm -f "/etc/cron.d/wpcron-${DOMAIN_SAFE}"
 log "WP-Cron-Job entfernt"
 
-# ── PHP Log-Datei ─────────────────────────────────────────────────────────
+# ── Log-Dateien entfernen ─────────────────────────────────────────────────
 rm -f "/var/log/php/${DOMAIN}.error.log"
+rm -f "/var/log/php/${DOMAIN}.slow.log"
+rm -f "/var/log/nginx/${DOMAIN}.access.log"
+rm -f "/var/log/nginx/${DOMAIN}.error.log"
+
+# ── SSL-Monitor-State entfernen ───────────────────────────────────────────
+rm -f "/var/lib/wp-hosting/ssl-state/${DOMAIN}"
 
 # ── Credentials-Datei archivieren ─────────────────────────────────────────
 mkdir -p /etc/wp-hosting/deleted
