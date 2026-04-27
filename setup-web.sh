@@ -636,14 +636,14 @@ for CRED_FILE in "${SITES_DIR}"/*.txt; do
     [[ ! -d "$SITE_PATH" ]] && continue
 
     WP="wp --path=${SITE_PATH} --allow-root"
-    $WP maintenance-mode activate 2>/dev/null || true
+    touch "${SITE_PATH}/wp-content/.maintenance-active" 2>/dev/null || true
     $WP core update            2>>"$LOG" && \
     $WP plugin update --all    2>>"$LOG" && \
     $WP theme update --all     2>>"$LOG" && \
     $WP core update-db         2>>"$LOG" && \
     $WP cache flush            2>/dev/null || true
     EXIT=$?
-    $WP maintenance-mode deactivate 2>/dev/null || true
+    rm -f "${SITE_PATH}/wp-content/.maintenance-active" 2>/dev/null || true
 
     if [[ $EXIT -eq 0 ]]; then
         echo "[$(date '+%Y-%m-%d %H:%M')] OK: ${DOMAIN}" >> "$LOG"
@@ -657,13 +657,19 @@ done
 # FastCGI Cache leeren
 [[ -d /var/cache/nginx/wp ]] && rm -rf /var/cache/nginx/wp/* 2>/dev/null || true
 
+# WP-CLI selbst aktualisieren
+wp cli update --allow-root --yes 2>>"$LOG" || true
+
 MSG="Auto-Update: ${UPDATED} OK, ${FAILED} Fehler"
 echo "[$(date '+%Y-%m-%d %H:%M')] ${MSG}" >> "$LOG"
 
 # Webhook-Benachrichtigung
 if [[ -n "${WEBHOOK_URL:-}" ]]; then
     STATUS=$( [[ $FAILED -eq 0 ]] && echo "up" || echo "down" )
-    curl -fsS "${WEBHOOK_URL}?status=${STATUS}&msg=${MSG}" -o /dev/null 2>/dev/null || true
+    curl -fsS -G \
+        --data-urlencode "msg=${MSG}" \
+        "${WEBHOOK_URL}?status=${STATUS}" \
+        -o /dev/null 2>/dev/null || true
 fi
 AUEOF
     chmod +x /usr/local/bin/wp-auto-update.sh

@@ -26,51 +26,54 @@ fi
 
 TOTAL=0; RUNNING=0; ISSUES=0
 
-printf "  %-35s %-14s %-8s %-8s %-8s %-12s\n" "DOMAIN" "TYP" "NGINX" "PHP-FPM" "REDIS" "INSTALLIERT"
+printf "  %-35s %-14s %-12s %-8s %-8s %-8s\n" "DOMAIN" "TYP" "STATUS" "NGINX" "PHP-FPM" "REDIS"
 echo "  $(printf '%.0s─' {1..90})"
 
 for CRED_FILE in "${SITES_DIR}"/*.txt; do
     DOMAIN=$(basename "$CRED_FILE" .txt)
     SITE_PATH="/var/www/${DOMAIN}"
-    DOMAIN_SAFE=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
 
     TYPE=$(grep "^Typ:" "$CRED_FILE" 2>/dev/null | awk '{print $2}' || echo "?")
-    INSTALLED=$(grep "^Installiert:" "$CRED_FILE" 2>/dev/null | cut -d' ' -f2 || echo "?")
+
+    # Maintenance Mode?
+    if [[ -f "${SITE_PATH}/wp-content/.maintenance-active" ]]; then
+        MAINT_STATUS="${YELLOW}[MAINTENANCE]${NC}"
+    else
+        MAINT_STATUS="${GREEN}[LIVE]${NC}"
+        RUNNING=$((RUNNING + 1))
+    fi
 
     # Nginx-Vhost aktiv?
     if [[ -L "/etc/nginx/sites-enabled/${DOMAIN}" ]]; then
-        NGINX_STATUS="${GREEN}✓ aktiv${NC}"
+        NGINX_STATUS="${GREEN}✓${NC}"
     else
-        NGINX_STATUS="${RED}✗ fehlt${NC}"
+        NGINX_STATUS="${RED}✗${NC}"
         ISSUES=$((ISSUES + 1))
     fi
 
     # PHP-FPM Socket vorhanden?
     if [[ -S "/run/php/php8.3-fpm-${DOMAIN}.sock" ]]; then
-        PHP_STATUS="${GREEN}✓ läuft${NC}"
+        PHP_STATUS="${GREEN}✓${NC}"
     else
-        PHP_STATUS="${RED}✗ fehlt${NC}"
+        PHP_STATUS="${RED}✗${NC}"
         ISSUES=$((ISSUES + 1))
     fi
 
     # Redis erreichbar?
     if command -v redis-cli &>/dev/null && redis-cli ping &>/dev/null; then
-        REDIS_STATUS="${GREEN}✓ ok${NC}"
+        REDIS_STATUS="${GREEN}✓${NC}"
     else
-        REDIS_STATUS="${RED}✗ fehlt${NC}"
+        REDIS_STATUS="${RED}✗${NC}"
     fi
 
     printf "  %-35s %-14s " "$DOMAIN" "$TYPE"
-    echo -ne "$NGINX_STATUS      $PHP_STATUS    $REDIS_STATUS   $INSTALLED\n" | \
-        sed "s/\x1b\[[0-9;]*m//g" | awk '{printf "%-8s %-8s %-8s %-12s\n", $1, $2, $3, $4}' || \
-        echo "$NGINX_STATUS $PHP_STATUS $REDIS_STATUS $INSTALLED"
+    echo -e "${MAINT_STATUS}  ${NGINX_STATUS}       ${PHP_STATUS}       ${REDIS_STATUS}"
 
     TOTAL=$((TOTAL + 1))
-    [[ -S "/run/php/php8.3-fpm-${DOMAIN}.sock" ]] && RUNNING=$((RUNNING + 1)) || true
 done
 
 echo ""
-echo "  Gesamt: ${BOLD}${TOTAL}${NC} Sites | Läuft: ${BOLD}${RUNNING}${NC}"
+echo "  Gesamt: ${BOLD}${TOTAL}${NC} Sites | Live: ${BOLD}${RUNNING}${NC} | Maintenance: ${BOLD}$((TOTAL - RUNNING))${NC}"
 [[ $ISSUES -gt 0 ]] && echo -e "  ${YELLOW}Hinweis: ${ISSUES} Problem(e) erkannt — Nginx/PHP-FPM prüfen.${NC}"
 
 # VM-Status

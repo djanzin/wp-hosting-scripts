@@ -97,8 +97,9 @@ for DOMAIN in "${SITES_TO_UPDATE[@]}"; do
     WP_CMD="wp --path=${SITE_PATH} --allow-root"
     SITE_OK=true
 
-    # Maintenance Mode aktivieren
-    $WP_CMD maintenance-mode activate 2>/dev/null || true
+    # Maintenance Mode aktivieren (custom flag — zeigt eigene Seite)
+    MAINT_FLAG="${SITE_PATH}/wp-content/.maintenance-active"
+    touch "$MAINT_FLAG" && chown "${SYSTEM_USER}:www-data" "$MAINT_FLAG" 2>/dev/null || true
 
     if $UPDATE_CORE; then
         if $WP_CMD core update 2>&1 | grep -qE "Success|already"; then
@@ -128,7 +129,7 @@ for DOMAIN in "${SITES_TO_UPDATE[@]}"; do
     log "  Cache geleert"
 
     # Maintenance Mode deaktivieren
-    $WP_CMD maintenance-mode deactivate 2>/dev/null || true
+    rm -f "${SITE_PATH}/wp-content/.maintenance-active" 2>/dev/null || true
 
     if $SITE_OK; then
         UPDATED+=("$DOMAIN")
@@ -157,7 +158,9 @@ if [[ -n "${WEBHOOK_URL:-}" ]]; then
     MSG="${#UPDATED[@]} Site(s) aktualisiert"
     [[ ${#FAILED[@]} -gt 0 ]] && MSG="${MSG}, ${#FAILED[@]} Fehler: ${FAILED[*]}"
     STATUS=$( [[ ${#FAILED[@]} -eq 0 ]] && echo "up" || echo "down" )
-    curl -fsS "${WEBHOOK_URL}?status=${STATUS}&msg=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$MSG" 2>/dev/null || echo "$MSG")" \
+    curl -fsS -G \
+        --data-urlencode "msg=${MSG}" \
+        "${WEBHOOK_URL}?status=${STATUS}" \
         -o /dev/null 2>/dev/null && log "Webhook-Benachrichtigung gesendet" || warn "Webhook fehlgeschlagen"
 fi
 

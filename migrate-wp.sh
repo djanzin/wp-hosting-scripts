@@ -242,33 +242,115 @@ request_slowlog_timeout               = 5s
 EOF
 mkdir -p /var/log/php
 
-# ── Nginx Vhost ───────────────────────────────────────────────────────────
+# ── Nginx Vhost (vollständig mit FastCGI-Cache, WebP, Rate-Limit) ─────────
 SOCK="/run/php/php8.3-fpm-${DOMAIN}.sock"
+
+# Rate-Limit Zone einmalig hinzufügen falls nötig
+if ! grep -q "zone=login" /etc/nginx/nginx.conf; then
+    sed -i '/http {/a\    limit_req_zone $binary_remote_addr zone=login:10m rate=1r\/s;' /etc/nginx/nginx.conf
+fi
+
+if [[ "$SITE_TYPE" == "woocommerce" ]]; then
 cat > "/etc/nginx/sites-available/${DOMAIN}" <<EOF
 server {
     listen 80;
     server_name ${DOMAIN} www.${DOMAIN};
     root ${SITE_PATH};
     index index.php;
+
     access_log /var/log/nginx/${DOMAIN}.access.log main;
     error_log  /var/log/nginx/${DOMAIN}.error.log warn;
+
     add_header X-Frame-Options "SAMEORIGIN";
     add_header X-Content-Type-Options "nosniff";
+    add_header X-XSS-Protection "1; mode=block";
+
+    set \$skip_cache 0;
+    if (\$request_method = POST)                                          { set \$skip_cache 1; }
+    if (\$query_string != "")                                             { set \$skip_cache 1; }
+    if (\$request_uri ~* "/cart|/checkout|/my-account|/wc-api|/wp-admin|\?wc-ajax=|/feed") { set \$skip_cache 1; }
+    if (\$http_cookie ~* "wordpress_logged_in|woocommerce_items_in_cart|woocommerce_cart_hash|wp_woocommerce_session") { set \$skip_cache 1; }
+
     location / { try_files \$uri \$uri/ /index.php?\$args; }
+
     location ~ \.php\$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:${SOCK};
         fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
         include fastcgi_params;
+        fastcgi_cache WPCACHE; fastcgi_cache_valid 200 301 302 1h;
+        fastcgi_cache_use_stale error timeout updating http_500;
+        fastcgi_cache_lock on; fastcgi_cache_bypass \$skip_cache; fastcgi_no_cache \$skip_cache;
+        fastcgi_cache_key "\$scheme\$request_method\$host\$request_uri";
+        add_header X-FastCGI-Cache \$upstream_cache_status;
     }
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff|woff2|svg|webp)\$ {
+
+    location ~* \.(jpg|jpeg|png|gif)\$ {
+        add_header Vary Accept;
+        try_files \$uri\$webp_suffix \$uri =404;
         expires 30d; add_header Cache-Control "public, no-transform"; log_not_found off;
     }
+
+    location ~* \.(ico|css|js|pdf|txt|woff|woff2|ttf|svg|webp|avif)\$ {
+        expires 30d; add_header Cache-Control "public, no-transform"; log_not_found off;
+    }
+
     location ~ /\.(ht|git|env) { deny all; }
     location = /xmlrpc.php     { deny all; }
-    location = /wp-login.php   { include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
+    location = /wp-login.php   { limit_req zone=login burst=3 nodelay; include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
 }
 EOF
+else
+cat > "/etc/nginx/sites-available/${DOMAIN}" <<EOF
+server {
+    listen 80;
+    server_name ${DOMAIN} www.${DOMAIN};
+    root ${SITE_PATH};
+    index index.php;
+
+    access_log /var/log/nginx/${DOMAIN}.access.log main;
+    error_log  /var/log/nginx/${DOMAIN}.error.log warn;
+
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-XSS-Protection "1; mode=block";
+
+    set \$skip_cache 0;
+    if (\$request_method = POST)                              { set \$skip_cache 1; }
+    if (\$query_string != "")                                 { set \$skip_cache 1; }
+    if (\$request_uri ~* "/wp-admin|/wp-login\.php|/feed")   { set \$skip_cache 1; }
+    if (\$http_cookie ~* "wordpress_logged_in")               { set \$skip_cache 1; }
+
+    location / { try_files \$uri \$uri/ /index.php?\$args; }
+
+    location ~ \.php\$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:${SOCK};
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
+        fastcgi_cache WPCACHE; fastcgi_cache_valid 200 301 302 1h;
+        fastcgi_cache_use_stale error timeout updating http_500;
+        fastcgi_cache_lock on; fastcgi_cache_bypass \$skip_cache; fastcgi_no_cache \$skip_cache;
+        fastcgi_cache_key "\$scheme\$request_method\$host\$request_uri";
+        add_header X-FastCGI-Cache \$upstream_cache_status;
+    }
+
+    location ~* \.(jpg|jpeg|png|gif)\$ {
+        add_header Vary Accept;
+        try_files \$uri\$webp_suffix \$uri =404;
+        expires 30d; add_header Cache-Control "public, no-transform"; log_not_found off;
+    }
+
+    location ~* \.(ico|css|js|pdf|txt|woff|woff2|ttf|svg|webp|avif)\$ {
+        expires 30d; add_header Cache-Control "public, no-transform"; log_not_found off;
+    }
+
+    location ~ /\.(ht|git|env) { deny all; }
+    location = /xmlrpc.php     { deny all; }
+    location = /wp-login.php   { limit_req zone=login burst=3 nodelay; include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
+}
+EOF
+fi
 ln -sf "/etc/nginx/sites-available/${DOMAIN}" "/etc/nginx/sites-enabled/${DOMAIN}"
 
 # ── WP-Cron ───────────────────────────────────────────────────────────────
@@ -279,6 +361,55 @@ chmod 644 "/etc/cron.d/wpcron-${DOMAIN_SAFE}"
 # ── Services neu laden ────────────────────────────────────────────────────
 nginx -t && systemctl reload nginx
 systemctl reload php8.3-fpm
+log "Services neu geladen"
+
+# ── Filebrowser User anlegen ─────────────────────────────────────────────
+FB_DB="/etc/filebrowser/database.db"
+FB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20) || true
+FB_USER="${DOMAIN_SAFE:0:32}"
+
+if [[ -f "$FB_DB" ]] && command -v filebrowser &>/dev/null; then
+    filebrowser users add "$FB_USER" "$FB_PASS" \
+        --scope "$SITE_PATH" --database "$FB_DB" \
+        --perm.create --perm.rename --perm.modify --perm.delete --perm.download 2>/dev/null || \
+    filebrowser users update "$FB_USER" \
+        --password "$FB_PASS" --scope "$SITE_PATH" \
+        --database "$FB_DB" 2>/dev/null || true
+    log "Filebrowser User angelegt: ${FB_USER}"
+else
+    warn "Filebrowser nicht gefunden — User manuell anlegen"
+    FB_PASS="n/a"
+fi
+
+# ── SFTP Chroot einrichten ────────────────────────────────────────────────
+SFTP_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20) || true
+SFTP_CHROOT="/var/sftp/${SYSTEM_USER}"
+
+groupadd --system sftpusers 2>/dev/null || true
+usermod -aG sftpusers "$SYSTEM_USER"
+echo "${SYSTEM_USER}:${SFTP_PASS}" | chpasswd
+
+mkdir -p "${SFTP_CHROOT}"
+chown root:root "${SFTP_CHROOT}"
+chmod 755 "${SFTP_CHROOT}"
+mkdir -p "${SFTP_CHROOT}/site"
+chown "${SYSTEM_USER}:www-data" "${SFTP_CHROOT}/site"
+chmod 750 "${SFTP_CHROOT}/site"
+
+if ! mountpoint -q "${SFTP_CHROOT}/site"; then
+    mount --bind "${SITE_PATH}" "${SFTP_CHROOT}/site"
+fi
+FSTAB_ENTRY="${SITE_PATH} ${SFTP_CHROOT}/site none bind 0 0"
+if ! grep -qF "$FSTAB_ENTRY" /etc/fstab; then
+    echo "$FSTAB_ENTRY" >> /etc/fstab
+fi
+log "SFTP Chroot eingerichtet: ${SFTP_CHROOT}"
+
+# ── Maintenance Mode aktivieren ───────────────────────────────────────────
+touch "${SITE_PATH}/wp-content/.maintenance-active"
+chown "${SYSTEM_USER}:www-data" "${SITE_PATH}/wp-content/.maintenance-active"
+chmod 640 "${SITE_PATH}/wp-content/.maintenance-active"
+log "Maintenance Mode aktiviert"
 
 # ── Credentials speichern ─────────────────────────────────────────────────
 mkdir -p /etc/wp-hosting/sites
@@ -298,6 +429,17 @@ DB-Name:       ${DB_NAME}
 DB-User:       ${DB_USER}
 DB-Pass:       ${DB_PASS}
 
+── Filebrowser ───────────────────────────────
+FB-User:       ${FB_USER}
+FB-Pass:       ${FB_PASS}
+
+── SFTP ──────────────────────────────────────
+SFTP-Host:     $(hostname -I | awk '{print $1}')
+SFTP-Port:     22
+SFTP-User:     ${SYSTEM_USER}
+SFTP-Pass:     ${SFTP_PASS}
+SFTP-Pfad:     /site
+
 ── Server ────────────────────────────────────
 Site-Pfad:     ${SITE_PATH}
 System-User:   ${SYSTEM_USER}
@@ -313,8 +455,13 @@ echo ""
 echo -e "  URL:        ${BOLD}https://${DOMAIN}${NC}"
 echo -e "  WP-Admin:   ${BOLD}https://${DOMAIN}/wp-admin${NC}"
 echo -e "  DB-Name:    ${BOLD}${DB_NAME}${NC}"
+echo -e "  FB-User:    ${BOLD}${FB_USER}${NC}"
+echo -e "  FB-Pass:    ${BOLD}${FB_PASS}${NC}"
+echo -e "  SFTP-User:  ${BOLD}${SYSTEM_USER}${NC}"
+echo -e "  SFTP-Pass:  ${BOLD}${SFTP_PASS}${NC}"
 echo ""
 echo -e "${YELLOW}  → NPM Proxy-Host für https://${DOMAIN} anlegen (→ Port 80).${NC}"
 echo -e "${YELLOW}  → Admin-Zugangsdaten vom Quell-Server gelten weiterhin.${NC}"
 echo -e "${YELLOW}  → Permalinks unter Einstellungen → Permalinks einmal speichern.${NC}"
+echo -e "${YELLOW}  → Site im Maintenance Mode — freischalten: sudo bash maintenance.sh${NC}"
 echo ""

@@ -201,9 +201,9 @@ echo ""
 FORCE_WEBHOOK="${1:-}"
 if [[ -n "${WEBHOOK_URL:-}" ]] && \
    [[ "$WEBHOOK_STATUS" == "down" || "$FORCE_WEBHOOK" == "--notify" ]]; then
-    curl -fsS "${WEBHOOK_URL}?status=${WEBHOOK_STATUS}&msg=$(python3 -c \
-        "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" \
-        "$WEBHOOK_MSG" 2>/dev/null || echo "$WEBHOOK_MSG")" \
+    curl -fsS -G \
+        --data-urlencode "msg=${WEBHOOK_MSG}" \
+        "${WEBHOOK_URL}?status=${WEBHOOK_STATUS}" \
         -o /dev/null 2>/dev/null && \
         log "Webhook-Alert gesendet" || warn "Webhook fehlgeschlagen"
     echo ""

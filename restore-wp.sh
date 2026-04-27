@@ -1,0 +1,243 @@
+#!/bin/bash
+# Stellt eine WordPress-Site aus einem lokalen Backup wieder her
+# Voraussetzung: setup-web.sh wurde ausgeführt, als root ausführen
+
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
+log()  { echo -e "${GREEN}[✓]${NC} $1"; }
+warn() { echo -e "${YELLOW}[!]${NC} $1"; }
+err()  { echo -e "${RED}[✗]${NC} $1"; exit 1; }
+info() { echo -e "${BLUE}[i]${NC} $1"; }
+
+[[ $EUID -ne 0 ]] && err "Als root ausführen: sudo bash restore-wp.sh"
+[[ ! -f /etc/wp-hosting/config ]] && err "Konfiguration nicht gefunden. Bitte zuerst setup-web.sh ausführen."
+
+source /etc/wp-hosting/config
+
+clear
+echo -e "${BOLD}"
+echo "╔══════════════════════════════════════════════╗"
+echo "║   WordPress Site wiederherstellen            ║"
+echo "╚══════════════════════════════════════════════╝"
+echo -e "${NC}"
+
+# ── Site auswählen ────────────────────────────────────────────────────────
+SITES_DIR="/etc/wp-hosting/sites"
+FILES_BACKUP_DIR="/var/backups/wp-files"
+
+if [[ -z "$(ls -A "$SITES_DIR" 2>/dev/null)" ]]; then
+    err "Keine installierten Sites gefunden."
+fi
+
+echo "Installierte Sites:"
+for f in "${SITES_DIR}"/*.txt; do
+    DOMAIN=$(basename "$f" .txt)
+    TYPE=$(grep "^Typ:" "$f" 2>/dev/null | awk '{print $2}' || echo "?")
+    echo "  - ${DOMAIN} (${TYPE})"
+done
+echo ""
+read -rp "Domain der wiederherzustellenden Site: " DOMAIN
+DOMAIN=$(echo "$DOMAIN" | tr '[:upper:]' '[:lower:]' | sed 's/^www\.//')
+[[ -z "$DOMAIN" ]] && err "Domain darf nicht leer sein."
+
+CRED_FILE="${SITES_DIR}/${DOMAIN}.txt"
+[[ ! -f "$CRED_FILE" ]] && err "Site '${DOMAIN}' nicht gefunden."
+
+DOMAIN_SAFE=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
+SITE_PATH="/var/www/${DOMAIN}"
+SYSTEM_USER="wp_${DOMAIN_SAFE:0:20}"
+
+DB_NAME=$(grep "^DB-Name:" "$CRED_FILE" | awk '{print $2}')
+DB_USER=$(grep "^DB-User:" "$CRED_FILE" | awk '{print $2}')
+DB_PASS=$(grep "^DB-Pass:" "$CRED_FILE" | awk '{print $2}')
+
+# ── Was soll wiederhergestellt werden? ────────────────────────────────────
+echo ""
+echo "Was soll wiederhergestellt werden?"
+echo "  1) Nur Dateien (wp-content)"
+echo "  2) Nur Datenbank"
+echo "  3) Beides (Dateien + Datenbank)"
+echo ""
+read -rp "Auswahl [1/2/3]: " restore_choice
+case "$restore_choice" in
+    1) RESTORE_FILES=true;  RESTORE_DB=false ;;
+    2) RESTORE_FILES=false; RESTORE_DB=true  ;;
+    3) RESTORE_FILES=true;  RESTORE_DB=true  ;;
+    *) err "Ungültige Auswahl." ;;
+esac
+
+# ── Datei-Backup auswählen ────────────────────────────────────────────────
+BACKUP_FILE=""
+if $RESTORE_FILES; then
+    echo ""
+    echo "Verfügbare Datei-Backups für ${DOMAIN}:"
+    BACKUPS=()
+    while IFS= read -r f; do
+        BACKUPS+=("$f")
+    done < <(ls -t "${FILES_BACKUP_DIR}/${DOMAIN}_"*.tar.gz 2>/dev/null || true)
+
+    if [[ ${#BACKUPS[@]} -eq 0 ]]; then
+        warn "Keine lokalen Datei-Backups gefunden in ${FILES_BACKUP_DIR}"
+        echo ""
+        read -rp "Pfad zu einer tar.gz-Datei (leer = Dateien überspringen): " CUSTOM_TAR
+        if [[ -n "$CUSTOM_TAR" ]]; then
+            [[ ! -f "$CUSTOM_TAR" ]] && err "Datei nicht gefunden: ${CUSTOM_TAR}"
+            BACKUP_FILE="$CUSTOM_TAR"
+        else
+            RESTORE_FILES=false
+        fi
+    else
+        for i in "${!BACKUPS[@]}"; do
+            SIZE=$(du -sh "${BACKUPS[$i]}" 2>/dev/null | cut -f1)
+            DATE=$(basename "${BACKUPS[$i]}" | sed "s/${DOMAIN}_//" | sed 's/\.tar\.gz//')
+            echo "  $((i+1))) ${DATE}  (${SIZE})"
+        done
+        echo ""
+        read -rp "Auswahl [1-${#BACKUPS[@]}]: " file_choice
+        [[ ! "$file_choice" =~ ^[0-9]+$ ]] || \
+        [[ $file_choice -lt 1 ]] || [[ $file_choice -gt ${#BACKUPS[@]} ]] && \
+            err "Ungültige Auswahl."
+        BACKUP_FILE="${BACKUPS[$((file_choice-1))]}"
+    fi
+fi
+
+# ── DB-Backup auswählen ───────────────────────────────────────────────────
+SQL_FILE=""
+if $RESTORE_DB; then
+    echo ""
+    echo "Datenbankwiederherstellung — Optionen:"
+    echo "  1) Aus lokalem MariaDB-Backup (/var/backups/mysql)"
+    echo "  2) Pfad zu SQL-Datei manuell angeben (.sql oder .sql.gz)"
+    echo ""
+    read -rp "Auswahl [1/2]: " db_choice
+
+    case "$db_choice" in
+        1)
+            DB_BACKUPS=()
+            while IFS= read -r f; do
+                DB_BACKUPS+=("$f")
+            done < <(ls -t /var/backups/mysql/*.sql.gz 2>/dev/null || true)
+
+            if [[ ${#DB_BACKUPS[@]} -eq 0 ]]; then
+                warn "Keine DB-Backups gefunden in /var/backups/mysql/"
+                RESTORE_DB=false
+            else
+                echo "Verfügbare DB-Backups:"
+                for i in "${!DB_BACKUPS[@]}"; do
+                    SIZE=$(du -sh "${DB_BACKUPS[$i]}" 2>/dev/null | cut -f1)
+                    echo "  $((i+1))) $(basename "${DB_BACKUPS[$i]}")  (${SIZE})"
+                done
+                echo ""
+                read -rp "Auswahl [1-${#DB_BACKUPS[@]}]: " db_idx
+                SQL_FILE="${DB_BACKUPS[$((db_idx-1))]}"
+            fi
+            ;;
+        2)
+            read -rp "Pfad zur SQL-Datei (.sql oder .sql.gz): " SQL_FILE
+            [[ ! -f "$SQL_FILE" ]] && err "Datei nicht gefunden: ${SQL_FILE}"
+            ;;
+        *) err "Ungültige Auswahl." ;;
+    esac
+fi
+
+# ── Zusammenfassung und Bestätigung ──────────────────────────────────────
+echo ""
+echo -e "${RED}${BOLD}ACHTUNG — folgende Daten werden überschrieben:${NC}"
+echo -e "  Site:    ${BOLD}${DOMAIN}${NC}"
+$RESTORE_FILES && echo -e "  Dateien: ${BOLD}${BACKUP_FILE}${NC} → ${SITE_PATH}/wp-content/"
+$RESTORE_DB    && echo -e "  DB:      ${BOLD}${SQL_FILE}${NC} → ${DB_NAME}"
+echo ""
+read -rp "Wiederherstellung starten? [j/N]: " confirm
+[[ "$confirm" != "j" && "$confirm" != "J" ]] && err "Abgebrochen."
+
+# ── Maintenance Mode aktivieren ───────────────────────────────────────────
+MAINT_FLAG="${SITE_PATH}/wp-content/.maintenance-active"
+touch "$MAINT_FLAG" && chown "${SYSTEM_USER}:www-data" "$MAINT_FLAG" 2>/dev/null || true
+log "Maintenance Mode aktiviert"
+
+# ── Dateien wiederherstellen ──────────────────────────────────────────────
+if $RESTORE_FILES && [[ -n "$BACKUP_FILE" ]]; then
+    info "Dateien werden wiederhergestellt aus: $(basename "$BACKUP_FILE")"
+
+    # wp-content sichern und ersetzen
+    CONTENT_PATH="${SITE_PATH}/wp-content"
+    TMP_RESTORE="/tmp/wp-restore-${DOMAIN_SAFE}-$(date +%s)"
+    mkdir -p "$TMP_RESTORE"
+
+    tar -xzf "$BACKUP_FILE" -C "$TMP_RESTORE" 2>/dev/null
+
+    # wp-content aus Backup ermitteln
+    if [[ -d "${TMP_RESTORE}/wp-content" ]]; then
+        SRC_CONTENT="${TMP_RESTORE}/wp-content"
+    else
+        SRC_CONTENT=$(find "$TMP_RESTORE" -maxdepth 2 -type d -name "wp-content" | head -1)
+    fi
+
+    if [[ -z "$SRC_CONTENT" ]]; then
+        rm -rf "$TMP_RESTORE"
+        err "wp-content Verzeichnis nicht im Backup gefunden."
+    fi
+
+    # Aktuelles wp-content sichern
+    if [[ -d "$CONTENT_PATH" ]]; then
+        ROLLBACK="${CONTENT_PATH}.rollback-$(date +%Y%m%d%H%M%S)"
+        mv "$CONTENT_PATH" "$ROLLBACK"
+        warn "Altes wp-content gesichert: ${ROLLBACK}"
+    fi
+
+    cp -a "$SRC_CONTENT" "$CONTENT_PATH"
+    chown -R "${SYSTEM_USER}:www-data" "$CONTENT_PATH"
+    find "$CONTENT_PATH" -type d -exec chmod 750 {} \;
+    find "$CONTENT_PATH" -type f -exec chmod 640 {} \;
+    rm -rf "$TMP_RESTORE"
+
+    # Maintenance-Flag nach Berechtigungen neu setzen
+    touch "$MAINT_FLAG" && chown "${SYSTEM_USER}:www-data" "$MAINT_FLAG" && chmod 640 "$MAINT_FLAG" 2>/dev/null || true
+
+    log "Dateien wiederhergestellt: ${CONTENT_PATH}"
+fi
+
+# ── Datenbank wiederherstellen ────────────────────────────────────────────
+if $RESTORE_DB && [[ -n "$SQL_FILE" ]]; then
+    info "Datenbank wird wiederhergestellt aus: $(basename "$SQL_FILE")"
+
+    # Tabellen leeren (nicht DB droppen — User-Rechte bleiben erhalten)
+    TABLES=$(mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" \
+        -e "SELECT table_name FROM information_schema.tables WHERE table_schema='${DB_NAME}';" \
+        --skip-column-names 2>/dev/null || echo "")
+
+    if [[ -n "$TABLES" ]]; then
+        mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME" \
+            -e "SET FOREIGN_KEY_CHECKS=0; $(echo "$TABLES" | awk '{print "DROP TABLE IF EXISTS \`"$1"\`;"}') SET FOREIGN_KEY_CHECKS=1;" \
+            2>/dev/null || true
+    fi
+
+    # Import
+    if [[ "$SQL_FILE" == *.gz ]]; then
+        zcat "$SQL_FILE" | mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME"
+    else
+        mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME" < "$SQL_FILE"
+    fi
+
+    log "Datenbank wiederhergestellt: ${DB_NAME}"
+fi
+
+# ── Caches leeren ─────────────────────────────────────────────────────────
+command -v wp &>/dev/null && wp cache flush --path="$SITE_PATH" --allow-root 2>/dev/null || true
+[[ -d /var/cache/nginx/wp ]] && rm -rf /var/cache/nginx/wp/* 2>/dev/null || true
+log "Caches geleert"
+
+# ── Ausgabe ───────────────────────────────────────────────────────────────
+echo ""
+echo -e "${BOLD}╔══════════════════════════════════════════════╗"
+echo -e "║   Wiederherstellung abgeschlossen ✓          ║"
+echo -e "╚══════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "  Domain:  ${BOLD}https://${DOMAIN}${NC}"
+$RESTORE_FILES && echo -e "  Dateien: ${BOLD}wiederhergestellt${NC}"
+$RESTORE_DB    && echo -e "  DB:      ${BOLD}wiederhergestellt${NC}"
+echo ""
+echo -e "${YELLOW}  → Site ist im Maintenance Mode — prüfen und freischalten:${NC}"
+echo -e "${YELLOW}    sudo bash maintenance.sh${NC}"
+echo ""

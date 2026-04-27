@@ -139,6 +139,55 @@ nginx -t && systemctl reload nginx
 systemctl reload php8.3-fpm
 log "Services neu geladen"
 
+# ── Filebrowser User anlegen ─────────────────────────────────────────────
+FB_DB="/etc/filebrowser/database.db"
+FB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20) || true
+FB_USER="${DST_SAFE:0:32}"
+
+if [[ -f "$FB_DB" ]] && command -v filebrowser &>/dev/null; then
+    filebrowser users add "$FB_USER" "$FB_PASS" \
+        --scope "$DST_PATH" \
+        --database "$FB_DB" \
+        --perm.create --perm.rename --perm.modify --perm.delete --perm.download 2>/dev/null || \
+    filebrowser users update "$FB_USER" \
+        --password "$FB_PASS" --scope "$DST_PATH" \
+        --database "$FB_DB" 2>/dev/null || true
+    log "Filebrowser User angelegt: ${FB_USER}"
+else
+    warn "Filebrowser nicht gefunden — User manuell anlegen"
+    FB_PASS="n/a"
+fi
+
+# ── SFTP Chroot einrichten ────────────────────────────────────────────────
+SFTP_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20) || true
+SFTP_CHROOT="/var/sftp/${DST_SYSTEM_USER}"
+
+groupadd --system sftpusers 2>/dev/null || true
+usermod -aG sftpusers "$DST_SYSTEM_USER"
+echo "${DST_SYSTEM_USER}:${SFTP_PASS}" | chpasswd
+
+mkdir -p "${SFTP_CHROOT}"
+chown root:root "${SFTP_CHROOT}"
+chmod 755 "${SFTP_CHROOT}"
+mkdir -p "${SFTP_CHROOT}/site"
+chown "${DST_SYSTEM_USER}:www-data" "${SFTP_CHROOT}/site"
+chmod 750 "${SFTP_CHROOT}/site"
+
+if ! mountpoint -q "${SFTP_CHROOT}/site"; then
+    mount --bind "${DST_PATH}" "${SFTP_CHROOT}/site"
+fi
+FSTAB_ENTRY="${DST_PATH} ${SFTP_CHROOT}/site none bind 0 0"
+if ! grep -qF "$FSTAB_ENTRY" /etc/fstab; then
+    echo "$FSTAB_ENTRY" >> /etc/fstab
+fi
+log "SFTP Chroot eingerichtet: ${SFTP_CHROOT}"
+
+# ── Maintenance Mode aktivieren ───────────────────────────────────────────
+touch "${DST_PATH}/wp-content/.maintenance-active"
+chown "${DST_SYSTEM_USER}:www-data" "${DST_PATH}/wp-content/.maintenance-active"
+chmod 640 "${DST_PATH}/wp-content/.maintenance-active"
+log "Maintenance Mode aktiviert"
+
 # ── Credentials speichern ─────────────────────────────────────────────────
 cat > "${SITES_DIR}/${DST_DOMAIN}.txt" <<EOF
 Domain:        https://${DST_DOMAIN}
@@ -157,6 +206,17 @@ DB-Name:       ${DST_DB_NAME}
 DB-User:       ${DST_DB_USER}
 DB-Pass:       ${DST_DB_PASS}
 
+── Filebrowser ───────────────────────────────
+FB-User:       ${FB_USER}
+FB-Pass:       ${FB_PASS}
+
+── SFTP ──────────────────────────────────────
+SFTP-Host:     $(hostname -I | awk '{print $1}')
+SFTP-Port:     22
+SFTP-User:     ${DST_SYSTEM_USER}
+SFTP-Pass:     ${SFTP_PASS}
+SFTP-Pfad:     /site
+
 ── Server ────────────────────────────────────
 Site-Pfad:     ${DST_PATH}
 System-User:   ${DST_SYSTEM_USER}
@@ -169,10 +229,15 @@ echo -e "${BOLD}╔════════════════════�
 echo -e "║   Klon erstellt ✓                            ║"
 echo -e "╚══════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  Quelle:   ${BOLD}https://${SRC_DOMAIN}${NC}"
-echo -e "  Ziel:     ${BOLD}https://${DST_DOMAIN}${NC}"
-echo -e "  DB:       ${BOLD}${DST_DB_NAME}${NC}"
+echo -e "  Quelle:     ${BOLD}https://${SRC_DOMAIN}${NC}"
+echo -e "  Ziel:       ${BOLD}https://${DST_DOMAIN}${NC}"
+echo -e "  DB:         ${BOLD}${DST_DB_NAME}${NC}"
+echo -e "  FB-User:    ${BOLD}${FB_USER}${NC}"
+echo -e "  FB-Pass:    ${BOLD}${FB_PASS}${NC}"
+echo -e "  SFTP-User:  ${BOLD}${DST_SYSTEM_USER}${NC}"
+echo -e "  SFTP-Pass:  ${BOLD}${SFTP_PASS}${NC}"
 echo ""
 echo -e "${YELLOW}  → NPM Proxy-Host für https://${DST_DOMAIN} anlegen (→ Port 80).${NC}"
 echo -e "${YELLOW}  → Admin-Passwort der Quell-Site gilt auch für den Klon.${NC}"
+echo -e "${YELLOW}  → Site im Maintenance Mode — freischalten: sudo bash maintenance.sh${NC}"
 echo ""
