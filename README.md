@@ -51,6 +51,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL-Terminierung)
 ### Schritt 1 — Template erstellen (Proxmox Host, einmalig)
 
 ```bash
+curl -sO https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/proxmox-create-template.sh
 bash proxmox-create-template.sh
 ```
 
@@ -61,6 +62,7 @@ Erstellt ein Ubuntu 24.04 Cloud-init Template (Standard-ID: 9000).
 ### Schritt 2 — VMs anlegen (Proxmox Host)
 
 ```bash
+curl -sO https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/proxmox-create-vm.sh
 bash proxmox-create-vm.sh   # Datenbank-VM
 bash proxmox-create-vm.sh   # WordPress-VM
 bash proxmox-create-vm.sh   # WooCommerce-VM
@@ -80,6 +82,7 @@ bash proxmox-create-vm.sh   # WooCommerce-VM
 
 ```bash
 ssh ubuntu@<DB-VM-IP>
+curl -sO https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/setup-db.sh
 sudo bash setup-db.sh
 ```
 
@@ -91,6 +94,7 @@ Gibt DB-Admin-Zugangsdaten aus → für Schritt 4 notieren.
 
 ```bash
 ssh ubuntu@<WEB-VM-IP>
+curl -sO https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/setup-web.sh
 sudo bash setup-web.sh
 ```
 
@@ -101,6 +105,7 @@ Fragt nach: VM-Typ, DB-VM-IP, DB-Zugangsdaten, Admin-E-Mail, NPM-IP, Webhook-URL
 ### Schritt 5 — Neue Site anlegen
 
 ```bash
+curl -sO https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/install-wp.sh
 sudo bash install-wp.sh
 ```
 
@@ -114,6 +119,7 @@ Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 Jede neue Site startet im **Maintenance Mode**:
 
 ```bash
+curl -sO https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/maintenance.sh
 sudo bash maintenance.sh
 ```
 
