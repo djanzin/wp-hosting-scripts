@@ -184,7 +184,8 @@ if [[ "${1:-}" == "--doctor" ]] || [[ "${2:-}" == "--doctor" ]]; then
             SITE_PATH="/var/www/${DOMAIN}"
             [[ ! -d "$SITE_PATH" ]] && continue
 
-            ISSUES=$(wp doctor check --all --path="$SITE_PATH" --allow-root --format=csv 2>/dev/null \
+            # Timeout 30s pro Site — verhindert dass langsame/kaputte Sites den Check blockieren
+            ISSUES=$(timeout 30 wp doctor check --all --path="$SITE_PATH" --allow-root --format=csv 2>/dev/null \
                 | tail -n +2 | awk -F',' '$2 == "error" || $2 == "warning" {print "  "$2": "$1" ("$3")"}' || true)
             if [[ -n "$ISSUES" ]]; then
                 echo -e "${YELLOW}${DOMAIN}:${NC}"

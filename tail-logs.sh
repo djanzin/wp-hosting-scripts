@@ -83,10 +83,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Jeden Log-Stream mit farbigem Tag-Prefix in Background starten
+# stdbuf -oL = line-buffered → reduziert Output-Verschachtelung paralleler Streams
 for i in "${!LOGS[@]}"; do
     TAG="${COLORS[$i]}[${TAGS[$i]}]${NC}"
-    tail -F "${LOGS[$i]}" 2>/dev/null | while IFS= read -r line; do
-        echo -e "${TAG} ${line}"
+    stdbuf -oL tail -F "${LOGS[$i]}" 2>/dev/null | while IFS= read -r line; do
+        printf '%b %s\n' "$TAG" "$line"
     done &
     PIDS+=($!)
 done

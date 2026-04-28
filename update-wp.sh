@@ -110,6 +110,8 @@ for DOMAIN in "${SITES_TO_UPDATE[@]}"; do
         fi
     fi
 
+    PLUGIN_COUNT=0
+    THEME_COUNT=0
     if $UPDATE_PLUGINS; then
         PLUGIN_COUNT=$($WP_CMD plugin update --all 2>&1 | grep -c "Updated" || echo "0")
         log "  Plugins: ${PLUGIN_COUNT} aktualisiert"
@@ -119,6 +121,10 @@ for DOMAIN in "${SITES_TO_UPDATE[@]}"; do
         THEME_COUNT=$($WP_CMD theme update --all 2>&1 | grep -c "Updated" || echo "0")
         log "  Themes: ${THEME_COUNT} aktualisiert"
     fi
+
+    # Pro-Site Detail in Logfile (für Cron-Auswertung)
+    LOGFILE="/var/log/wp-update-detail.log"
+    echo "[$(date '+%Y-%m-%d %H:%M')] ${DOMAIN}: core=$( $UPDATE_CORE && echo y || echo n) plugins=${PLUGIN_COUNT} themes=${THEME_COUNT} ok=${SITE_OK}" >> "$LOGFILE" 2>/dev/null || true
 
     # Datenbank-Migration falls nötig
     $WP_CMD core update-db 2>&1 | grep -q "Success" && log "  DB-Schema aktualisiert" || true

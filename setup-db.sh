@@ -356,9 +356,10 @@ for DB in \$DB_LIST; do
     fi
 done
 
-# Remote-Upload via rclone (nur die heutigen Dumps)
+# Remote-Upload via rclone (nur die heutigen Dumps, mit Bandbreiten-Drosselung tagsüber)
 if [[ -n "\$RCLONE_DEST" ]] && command -v rclone &>/dev/null; then
-    if rclone copy "\$BACKUP_DIR" "\$RCLONE_DEST" --include "*_\${DATE}.\${EXT}" 2>> "\$LOG"; then
+    if rclone copy "\$BACKUP_DIR" "\$RCLONE_DEST" --include "*_\${DATE}.\${EXT}" \
+        --bwlimit "08:00,8M 22:00,off" 2>> "\$LOG"; then
         echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Upload OK → \${RCLONE_DEST}" >> "\$LOG"
     else
         echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Upload FEHLER" >> "\$LOG"

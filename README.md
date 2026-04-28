@@ -116,6 +116,8 @@ sudo bash install-wp.sh
 Fragt nach Domain und Typ (WordPress oder WooCommerce).
 Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 
+> **Tipp:** Bei abgebrochener Installation (z.B. Netzwerkfehler beim Plugin-Download) kann mit `sudo bash install-wp.sh --resume` ein sauberer Neustart erzwungen werden — Reste der vorherigen Installation werden vor dem Neuversuch automatisch entfernt.
+
 ---
 
 ### Schritt 6 — Site freischalten

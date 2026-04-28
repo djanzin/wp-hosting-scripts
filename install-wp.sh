@@ -122,8 +122,15 @@ fi
 _INSTALL_DONE=false
 cleanup_on_error() {
     [[ "$_INSTALL_DONE" == "true" ]] && return
+    local FAILED_CMD="${BASH_COMMAND:-?}"
+    local FAILED_LINE="${BASH_LINENO[0]:-?}"
     echo ""
-    echo -e "${RED}[✗]${NC} Installation fehlgeschlagen — räume auf..."
+    echo -e "${RED}[✗]${NC} Installation fehlgeschlagen (Zeile ${FAILED_LINE}: ${FAILED_CMD})"
+    echo -e "${RED}[✗]${NC} Räume auf — bereits angelegte Ressourcen werden entfernt..."
+
+    # Logfile mit Aufräum-Aktionen
+    CLEANUP_LOG="/var/log/wp-install-cleanup.log"
+    echo "[$(date '+%Y-%m-%d %H:%M')] Cleanup für ${DOMAIN:-?} (Zeile ${FAILED_LINE})" >> "$CLEANUP_LOG"
 
     # Nginx-Vhost entfernen
     rm -f "/etc/nginx/sites-enabled/${DOMAIN}"

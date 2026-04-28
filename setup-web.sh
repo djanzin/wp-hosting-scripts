@@ -116,8 +116,14 @@ case "$RCLONE_CHOICE" in
 esac
 
 echo ""
+read -rp "Backups mit age verschlüsseln? [j/N]: " ENABLE_AGE_CHOICE
+ENABLE_AGE=false
+[[ "$ENABLE_AGE_CHOICE" == "j" || "$ENABLE_AGE_CHOICE" == "J" ]] && ENABLE_AGE=true
+
+echo ""
 info "VM-Typ: ${BOLD}${VM_TYPE}${NC}"
 info "DB-Host: ${BOLD}${DB_HOST}${NC}"
+$ENABLE_AGE && info "Backup-Verschlüsselung: ${BOLD}aktiv (age)${NC}"
 echo ""
 read -rp "Einrichtung starten? [j/N]: " confirm
 [[ "$confirm" != "j" && "$confirm" != "J" ]] && err "Abgebrochen."
@@ -869,10 +875,12 @@ for f in "\${SITES_DIR}"/*.txt; do
     fi
 done
 
-# Remote-Sync
+# Remote-Sync mit Bandbreiten-Drosselung tagsüber
+# (08:00–22:00: 8 MB/s, sonst unbegrenzt — schont Upload-Leitung wenn Site live ist)
 if [[ -n "\${RCLONE_DEST:-}" ]] && command -v rclone &>/dev/null; then
     if rclone sync "\$BACKUP_DIR" "\$RCLONE_DEST" \
-        --include "*_\${DATE}.tar.gz" --include "*_\${DATE}.tar.gz.age" 2>/dev/null; then
+        --include "*_\${DATE}.tar.gz" --include "*_\${DATE}.tar.gz.age" \
+        --bwlimit "08:00,8M 22:00,off" 2>/dev/null; then
         echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Sync OK → \${RCLONE_DEST}" >> "\$LOG"
     else
         echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Sync FEHLER" >> "\$LOG"
@@ -1066,10 +1074,8 @@ echo "0 4 * * 1 root /usr/local/bin/cf-ip-update.sh" > /etc/cron.d/cf-ip-update
 log "Cloudflare IP Auto-Update eingerichtet (montags 04:00 Uhr)"
 
 # ── Backup-Verschlüsselung (age) ──────────────────────────────────────────
-# Optional: Backups vor Remote-Upload mit age verschlüsseln
-echo ""
-read -rp "Backups mit age verschlüsseln? [j/N]: " enc_choice
-if [[ "$enc_choice" == "j" || "$enc_choice" == "J" ]]; then
+# Wenn am Anfang gewählt: Keypair generieren (age ist nun installiert)
+if $ENABLE_AGE; then
     AGE_KEY_FILE="/etc/wp-hosting/backup-key.txt"
     AGE_PUB_FILE="/etc/wp-hosting/backup-recipient.txt"
 
@@ -1078,17 +1084,9 @@ if [[ "$enc_choice" == "j" || "$enc_choice" == "J" ]]; then
     else
         age-keygen -o "$AGE_KEY_FILE" 2>/dev/null
         chmod 600 "$AGE_KEY_FILE"
-        # Public-Key extrahieren
         grep "^# public key:" "$AGE_KEY_FILE" | awk '{print $4}' > "$AGE_PUB_FILE"
         chmod 644 "$AGE_PUB_FILE"
         log "age-Keypair generiert: ${AGE_KEY_FILE}"
-        echo ""
-        echo -e "${YELLOW}${BOLD}WICHTIG:${NC} ${AGE_KEY_FILE} sicher aufbewahren (z.B. Passwort-Manager)!"
-        echo -e "${YELLOW}Ohne diesen Key sind Backups nicht wiederherstellbar.${NC}"
-        echo ""
-        cat "$AGE_KEY_FILE"
-        echo ""
-        read -rp "Drücke Enter wenn der Key gesichert ist..."
     fi
 fi
 
@@ -1141,6 +1139,19 @@ echo -e "  Disk Alert:    ${BOLD}/usr/local/bin/disk-alert.sh${NC} (stündlich, 
 echo -e "  SSL Monitor:   ${BOLD}/usr/local/bin/ssl-monitor.sh${NC} (alle 6h, Alert nur bei Erneuerungsfehler)"
 [[ -n "${RCLONE_REMOTE:-}" ]] && \
     echo -e "  Remote-Backup: ${BOLD}${RCLONE_DEST}${NC}"
+
+# age-Key prominent ausgeben — User MUSS ihn sichern
+if $ENABLE_AGE && [[ -f /etc/wp-hosting/backup-key.txt ]]; then
+    echo ""
+    echo -e "${YELLOW}${BOLD}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}${BOLD}║   age-Key — JETZT SICHERN (Passwort-Manager)!║${NC}"
+    echo -e "${YELLOW}${BOLD}╚══════════════════════════════════════════════╝${NC}"
+    echo ""
+    cat /etc/wp-hosting/backup-key.txt
+    echo ""
+    echo -e "${YELLOW}Ohne diesen Key sind verschlüsselte Backups NICHT wiederherstellbar!${NC}"
+    echo -e "${YELLOW}Datei: /etc/wp-hosting/backup-key.txt${NC}"
+fi
 echo ""
 echo -e "${YELLOW}  → phpMyAdmin- und Filebrowser-Passwort notieren!${NC}"
 [[ -n "${SEOPRESS_KEY:-}" ]] && \

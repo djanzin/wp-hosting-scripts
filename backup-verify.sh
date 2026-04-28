@@ -18,11 +18,25 @@ AGE_KEY="/etc/wp-hosting/backup-key.txt"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# Bei Webhook-Push (Cron-Modus) keine Farben
-if [[ "${1:-}" == "--quiet" ]]; then
-    QUIET=true
-else
-    QUIET=false
+# Flags parsen
+QUIET=false
+DEEP=false
+for arg in "$@"; do
+    case "$arg" in
+        --quiet)  QUIET=true ;;
+        --deep)   DEEP=true ;;
+        --notify) ;; # später ausgewertet
+    esac
+done
+
+# --deep: einmal pro Monat (am 1.) zusätzlich das ÄLTESTE Backup prüfen
+# (testet ob Retention-Logic noch greift und alte Backups lesbar sind)
+if [[ "$(date +%d)" == "01" ]] && ! $DEEP; then
+    DEEP=true
+    $QUIET || echo "Monatlich am 1.: Auch ältestes Backup wird geprüft (--deep)"
+fi
+
+if ! $QUIET; then
     clear
     echo -e "${BOLD}"
     echo "╔══════════════════════════════════════════════╗"
@@ -68,15 +82,30 @@ verify_file() {
     return 0
 }
 
-# Datei-Backups (jeweils das jüngste pro Domain)
+# Helper: jüngstes (und im --deep Modus zusätzlich ältestes) Backup pro Gruppe
+collect_backups() {
+    local dir="$1" pattern_re="$2"
+    local -A first_seen last_seen
+    while IFS= read -r f; do
+        local key
+        key=$(basename "$f" | sed -E "$pattern_re")
+        [[ -z "${first_seen[$key]:-}" ]] && first_seen[$key]="$f"
+        last_seen[$key]="$f"
+    done < <(ls -t "$dir"/*.tar.gz "$dir"/*.tar.gz.age "$dir"/*.sql.gz "$dir"/*.sql.gz.age 2>/dev/null || true)
+    # Jüngstes (first in -t order) + im DEEP-Modus auch ältestes
+    for k in "${!first_seen[@]}"; do
+        echo "${first_seen[$k]}"  # jüngstes
+        if $DEEP && [[ "${first_seen[$k]}" != "${last_seen[$k]}" ]]; then
+            echo "${last_seen[$k]}"  # ältestes (zusätzlich)
+        fi
+    done
+}
+
+# Datei-Backups
 $QUIET || echo -e "${BOLD}── Datei-Backups ──────────────────────────────${NC}"
-declare -A SEEN
 if [[ -d "$FILES_DIR" ]]; then
     while IFS= read -r f; do
-        DOMAIN=$(basename "$f" | sed -E 's/_[0-9-]+\.tar\.gz(\.age)?$//')
-        [[ -n "${SEEN[$DOMAIN]:-}" ]] && continue  # nur jüngstes pro Domain
-        SEEN[$DOMAIN]=1
-
+        [[ -z "$f" ]] && continue
         if verify_file "$f" "files"; then
             $QUIET || log "$(basename "$f")"
             OK=$((OK+1))
@@ -84,19 +113,15 @@ if [[ -d "$FILES_DIR" ]]; then
             $QUIET || warn "$(basename "$f")"
             FAILED=$((FAILED+1))
         fi
-    done < <(ls -t "$FILES_DIR"/*.tar.gz "$FILES_DIR"/*.tar.gz.age 2>/dev/null || true)
+    done < <(collect_backups "$FILES_DIR" 's/_[0-9-]+\.tar\.gz(\.age)?$//')
 fi
 
-# DB-Backups (jeweils das jüngste pro DB)
+# DB-Backups
 $QUIET || echo ""
 $QUIET || echo -e "${BOLD}── DB-Backups ──────────────────────────────────${NC}"
-declare -A SEEN_DB
 if [[ -d "$DB_DIR" ]]; then
     while IFS= read -r f; do
-        DB=$(basename "$f" | sed -E 's/_[0-9_]+\.sql\.gz(\.age)?$//')
-        [[ -n "${SEEN_DB[$DB]:-}" ]] && continue
-        SEEN_DB[$DB]=1
-
+        [[ -z "$f" ]] && continue
         if verify_file "$f" "db"; then
             $QUIET || log "$(basename "$f")"
             OK=$((OK+1))
@@ -104,7 +129,7 @@ if [[ -d "$DB_DIR" ]]; then
             $QUIET || warn "$(basename "$f")"
             FAILED=$((FAILED+1))
         fi
-    done < <(ls -t "$DB_DIR"/*.sql.gz "$DB_DIR"/*.sql.gz.age 2>/dev/null || true)
+    done < <(collect_backups "$DB_DIR" 's/_[0-9_]+\.sql\.gz(\.age)?$//')
 fi
 
 # Ergebnis
@@ -122,8 +147,10 @@ else
 fi
 
 # Webhook
+NOTIFY=false
+for arg in "$@"; do [[ "$arg" == "--notify" ]] && NOTIFY=true; done
 source /etc/wp-hosting/config 2>/dev/null || true
-if [[ -n "${WEBHOOK_URL:-}" ]] && [[ "$STATUS" == "down" || "${1:-}" == "--notify" || "${2:-}" == "--notify" ]]; then
+if [[ -n "${WEBHOOK_URL:-}" ]] && { [[ "$STATUS" == "down" ]] || $NOTIFY; }; then
     curl -fsS -G --data-urlencode "msg=${MSG}" "${WEBHOOK_URL}?status=${STATUS}" \
         -o /dev/null 2>/dev/null || true
 fi

@@ -136,10 +136,20 @@ qm set "$VM_ID" \
     --balloon 0
 
 # Disk nur vergrößern wenn Zielgröße > aktuelle Größe (Proxmox unterstützt kein Shrinking)
-CURRENT_DISK_GB=$(qm config "$VM_ID" | grep "scsi0:" | grep -oP 'size=\K[0-9]+' || echo "0")
+# Größenangabe kann K/M/G/T sein — auf GB normalisieren für Vergleich
+CURRENT_DISK_RAW=$(qm config "$VM_ID" | grep "scsi0:" | grep -oP 'size=\K[0-9]+[KMGT]?' || echo "0G")
+CURRENT_DISK_NUM=${CURRENT_DISK_RAW%[KMGT]}
+CURRENT_DISK_UNIT=${CURRENT_DISK_RAW##*[0-9]}
+case "${CURRENT_DISK_UNIT:-G}" in
+    K) CURRENT_DISK_GB=$(( CURRENT_DISK_NUM / 1024 / 1024 )) ;;
+    M) CURRENT_DISK_GB=$(( CURRENT_DISK_NUM / 1024 )) ;;
+    T) CURRENT_DISK_GB=$(( CURRENT_DISK_NUM * 1024 )) ;;
+    G|*) CURRENT_DISK_GB=$CURRENT_DISK_NUM ;;
+esac
+
 if [[ "${VM_DISK}" -gt "${CURRENT_DISK_GB:-0}" ]]; then
     qm resize "$VM_ID" scsi0 "${VM_DISK}G"
-    log "Disk auf ${VM_DISK} GB vergrößert"
+    log "Disk auf ${VM_DISK} GB vergrößert (vorher: ${CURRENT_DISK_RAW})"
 else
     warn "Template-Disk (${CURRENT_DISK_GB} GB) ≥ Zielgröße (${VM_DISK} GB) — Größe wird beibehalten"
 fi
