@@ -241,6 +241,19 @@ Webhook-Format: **Uptime Kuma Push Monitor** (`GET ?status=up|down&msg=…`).
 - Bandbreiten-Limit wie bei Files-Backup
 - Optional: **age-Verschlüsselung** vor Upload (`.sql.gz.age`)
 
+### Bucket-Layout
+**Ein Bucket reicht** für die ganze Infrastruktur. Pfade werden automatisch um den
+Hostname der jeweiligen VM ergänzt — keine Kollisionen zwischen mehreren VMs:
+
+```
+r2:wp-backups/                          ← 1 Bucket (z.B. "wp-backups")
+├── wp-files-<web-vm-1-hostname>/       ← WordPress-VM
+├── wp-files-<web-vm-2-hostname>/       ← WooCommerce-VM
+└── mysql-backups-<db-vm-hostname>/     ← Datenbank-VM
+```
+
+Bei der Setup-Abfrage gibst du auf jeder VM **denselben Bucket-Namen** ein.
+
 ### Backup-Verifikation
 - Wöchentlich (Sonntag 04:00): `backup-verify.sh` prüft tar-Integrität, age-Entschlüsselbarkeit und SQL-Inhalt
 - Webhook-Alert bei beschädigten Backups

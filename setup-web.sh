@@ -82,6 +82,9 @@ echo "  2) S3-kompatibel (AWS, MinIO, etc.)"
 echo "  3) SFTP"
 echo ""
 
+# Hostname für eindeutigen Pfad (verhindert Kollisionen mehrerer Web-VMs auf gleichem Bucket)
+WEB_HOSTNAME=$(hostname -s)
+
 RCLONE_REMOTE=""
 while [[ -z "$RCLONE_REMOTE" ]]; do
     read -rp "Auswahl [1-3]: " RCLONE_CHOICE
@@ -94,7 +97,7 @@ while [[ -z "$RCLONE_REMOTE" ]]; do
             [[ -z "$R2_ACCOUNT_ID" || -z "$R2_KEY_ID" || -z "$R2_KEY_SECRET" || -z "$R2_BUCKET" ]] && \
                 { warn "Alle R2-Felder sind Pflicht — bitte erneut eingeben."; continue; }
             RCLONE_REMOTE="r2"
-            RCLONE_DEST="r2:${R2_BUCKET}/wp-files"
+            RCLONE_DEST="r2:${R2_BUCKET}/wp-files-${WEB_HOSTNAME}"
             ;;
         2)
             read -rp "S3 Region (z.B. eu-central-1): " S3_REGION
@@ -105,21 +108,23 @@ while [[ -z "$RCLONE_REMOTE" ]]; do
             [[ -z "$S3_BUCKET" || -z "$S3_KEY_ID" || -z "$S3_KEY_SECRET" ]] && \
                 { warn "Bucket, Key-ID und Secret sind Pflicht — bitte erneut eingeben."; continue; }
             RCLONE_REMOTE="s3backup"
-            RCLONE_DEST="s3backup:${S3_BUCKET}/wp-files"
+            RCLONE_DEST="s3backup:${S3_BUCKET}/wp-files-${WEB_HOSTNAME}"
             ;;
         3)
             read -rp "SFTP Host: " SFTP_HOST
             read -rp "SFTP User: " SFTP_USER
-            read -rp "SFTP Pfad (z.B. /backups/wp-files): " SFTP_PATH
+            read -rp "SFTP Pfad-Präfix (z.B. /backups): " SFTP_PATH
             read -rp "SFTP Port [22]: " SFTP_PORT; SFTP_PORT=${SFTP_PORT:-22}
             [[ -z "$SFTP_HOST" || -z "$SFTP_USER" || -z "$SFTP_PATH" ]] && \
                 { warn "Host, User und Pfad sind Pflicht — bitte erneut eingeben."; continue; }
             RCLONE_REMOTE="sftpbackup"
-            RCLONE_DEST="sftpbackup:${SFTP_PATH}"
+            RCLONE_DEST="sftpbackup:${SFTP_PATH}/wp-files-${WEB_HOSTNAME}"
             ;;
         *) warn "Ungültig — Remote-Backup ist Pflicht. Bitte 1, 2 oder 3 wählen." ;;
     esac
 done
+
+info "Remote-Backup-Pfad: ${BOLD}${RCLONE_DEST}${NC}"
 
 echo ""
 read -rp "Backups mit age verschlüsseln? [j/N]: " ENABLE_AGE_CHOICE
