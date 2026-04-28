@@ -47,6 +47,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL-Terminierung)
 | `status.sh` | Web-VM | Dashboard: Sites, Disk, Load, SSL, Updates, Backups | Bei Bedarf |
 | `tail-logs.sh` | Web-VM | Live-Logs einer Site (Nginx + PHP, farblich getrennt) | Bei Bedarf |
 | `audit-plugins.sh` | Web-VM | Plugin-/Site-Audit: veraltete/inaktive Plugins, Admin-User, DB-Bloat | Monatlich |
+| `sync-plugins.sh` | Web-VM | Private Plugin-ZIPs (SEOpress Pro etc.) aus Plugin-Bucket nachladen | Bei Plugin-Update |
 | `db-backup.sh` | Datenbank-VM | Manuellen MariaDB-Dump erstellen | Bei Bedarf |
 
 ---
@@ -116,6 +117,8 @@ sudo bash install-wp.sh
 
 Fragt nach Domain und Typ (WordPress oder WooCommerce).
 Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
+
+> **SEOpress Pro:** Lade die ZIP einmal nach `r2:wp-plugins/seopress-pro.zip` hoch (oder welcher Plugin-Bucket bei Setup angegeben wurde). Beim ersten `setup-web.sh`-Lauf wird sie automatisch nach `/etc/wp-hosting/plugins/` synchronisiert. Spätere Updates: ZIP in R2 ersetzen, dann `sudo bash sync-plugins.sh`.
 
 > **Tipp:** Bei abgebrochener Installation (z.B. Netzwerkfehler beim Plugin-Download) kann mit `sudo bash install-wp.sh --resume` ein sauberer Neustart erzwungen werden — Reste der vorherigen Installation werden vor dem Neuversuch automatisch entfernt.
 
@@ -242,17 +245,31 @@ Webhook-Format: **Uptime Kuma Push Monitor** (`GET ?status=up|down&msg=…`).
 - Optional: **age-Verschlüsselung** vor Upload (`.sql.gz.age`)
 
 ### Bucket-Layout
-**Ein Bucket reicht** für die ganze Infrastruktur. Pfade werden automatisch um den
-Hostname der jeweiligen VM ergänzt — keine Kollisionen zwischen mehreren VMs:
+Empfohlen: **2 Buckets** in derselben R2/S3-Storage:
 
 ```
-r2:wp-backups/                          ← 1 Bucket (z.B. "wp-backups")
-├── wp-files-<web-vm-1-hostname>/       ← WordPress-VM
-├── wp-files-<web-vm-2-hostname>/       ← WooCommerce-VM
-└── mysql-backups-<db-vm-hostname>/     ← Datenbank-VM
+r2:wp-backups/                          ← Backup-Bucket
+├── wp-files-<web-vm-1-hostname>/       ← WordPress-VM Backups
+├── wp-files-<web-vm-2-hostname>/       ← WooCommerce-VM Backups
+└── mysql-backups-<db-vm-hostname>/     ← DB-VM Backups
+
+r2:wp-plugins/                          ← Plugin-Bucket (private Pro-Plugins)
+├── seopress-pro.zip
+└── <weitere>.zip
 ```
 
-Bei der Setup-Abfrage gibst du auf jeder VM **denselben Bucket-Namen** ein.
+**Warum 2 Buckets:** Backups haben kurze Retention (7 Tage Mirror), Plugin-ZIPs
+haben dauerhafte Aufbewahrung. Trennung erleichtert Lifecycle-Rules und
+verhindert versehentliches Löschen von Plugins durch Backup-Sync.
+
+Bei der Setup-Abfrage gibst du beide Bucket-Namen einmal ein. Plugin-ZIPs
+werden beim Setup automatisch nach `/etc/wp-hosting/plugins/` heruntergeladen.
+
+**Plugin-Updates:** Nach Upload einer neuen ZIP-Version in den Plugin-Bucket:
+```bash
+sudo bash sync-plugins.sh           # alle Plugins neu laden (Mirror)
+sudo bash sync-plugins.sh --list    # zeigt lokal + remote
+```
 
 ### Backup-Verifikation
 - Wöchentlich (Sonntag 04:00): `backup-verify.sh` prüft tar-Integrität, age-Entschlüsselbarkeit und SQL-Inhalt

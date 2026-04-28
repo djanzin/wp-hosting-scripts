@@ -126,6 +126,13 @@ done
 
 info "Remote-Backup-Pfad: ${BOLD}${RCLONE_DEST}${NC}"
 
+# Optional: Bucket für private/Pro-Plugin-ZIPs (SEOpress Pro etc.)
+echo ""
+read -rp "Bucket-Name für Plugin-ZIPs (z.B. wp-plugins, leer = überspringen): " PLUGIN_BUCKET
+if [[ -n "$PLUGIN_BUCKET" ]]; then
+    info "Plugin-Bucket: ${BOLD}${RCLONE_REMOTE}:${PLUGIN_BUCKET}${NC}"
+fi
+
 echo ""
 read -rp "Backups mit age verschlüsseln? [j/N]: " ENABLE_AGE_CHOICE
 ENABLE_AGE=false
@@ -201,6 +208,19 @@ EOF
     esac
     chmod 600 /root/.config/rclone/rclone.conf
     log "rclone konfiguriert (Remote: ${RCLONE_REMOTE} → ${RCLONE_DEST})"
+
+    # Plugin-ZIPs vom Plugin-Bucket laden (SEOpress Pro, andere private Plugins)
+    if [[ -n "$PLUGIN_BUCKET" ]]; then
+        mkdir -p /etc/wp-hosting/plugins
+        info "Lade Plugin-ZIPs aus ${RCLONE_REMOTE}:${PLUGIN_BUCKET}..."
+        if rclone copy "${RCLONE_REMOTE}:${PLUGIN_BUCKET}/" /etc/wp-hosting/plugins/ \
+            --include "*.zip" 2>/dev/null; then
+            FOUND=$(ls /etc/wp-hosting/plugins/*.zip 2>/dev/null | wc -l)
+            log "  ${FOUND} Plugin-ZIP(s) geladen → /etc/wp-hosting/plugins/"
+        else
+            warn "  Plugin-Bucket leer oder nicht erreichbar — manuell befüllen"
+        fi
+    fi
 fi
 
 # ── Automatische Sicherheitsupdates ───────────────────────────────────────
@@ -1147,6 +1167,7 @@ NPM_IP=${NPM_IP}
 WEBHOOK_URL=${WEBHOOK_URL:-}
 RCLONE_REMOTE=${RCLONE_REMOTE:-}
 RCLONE_DEST=${RCLONE_DEST:-}
+PLUGIN_BUCKET=${PLUGIN_BUCKET:-}
 SEOPRESS_KEY=${SEOPRESS_KEY:-}
 PMA_AUTH_PASS=${PMA_AUTH_PASS}
 EOF
