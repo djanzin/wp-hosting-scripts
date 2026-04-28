@@ -75,7 +75,7 @@ if $RESTORE_FILES; then
     BACKUPS=()
     while IFS= read -r f; do
         BACKUPS+=("$f")
-    done < <(ls -t "${FILES_BACKUP_DIR}/${DOMAIN}_"*.tar.gz 2>/dev/null || true)
+    done < <(ls -t "${FILES_BACKUP_DIR}/${DOMAIN}_"*.tar.gz "${FILES_BACKUP_DIR}/${DOMAIN}_"*.tar.gz.age 2>/dev/null || true)
 
     if [[ ${#BACKUPS[@]} -eq 0 ]]; then
         warn "Keine lokalen Datei-Backups gefunden in ${FILES_BACKUP_DIR}"
@@ -117,7 +117,8 @@ if $RESTORE_DB; then
             DB_BACKUPS=()
             while IFS= read -r f; do
                 DB_BACKUPS+=("$f")
-            done < <(ls -t /var/backups/mysql/*.sql.gz 2>/dev/null || true)
+            done < <(ls -t /var/backups/mysql/${DB_NAME}_*.sql.gz /var/backups/mysql/${DB_NAME}_*.sql.gz.age 2>/dev/null || \
+                     ls -t /var/backups/mysql/*.sql.gz /var/backups/mysql/*.sql.gz.age 2>/dev/null || true)
 
             if [[ ${#DB_BACKUPS[@]} -eq 0 ]]; then
                 warn "Keine DB-Backups gefunden in /var/backups/mysql/"
@@ -157,6 +158,7 @@ touch "$MAINT_FLAG" && chown "${SYSTEM_USER}:www-data" "$MAINT_FLAG" 2>/dev/null
 log "Maintenance Mode aktiviert"
 
 # ── Dateien wiederherstellen ──────────────────────────────────────────────
+ROLLBACK=""  # Wird unten gesetzt wenn altes wp-content gesichert wurde
 if $RESTORE_FILES && [[ -n "$BACKUP_FILE" ]]; then
     info "Dateien werden wiederhergestellt aus: $(basename "$BACKUP_FILE")"
 
@@ -165,7 +167,16 @@ if $RESTORE_FILES && [[ -n "$BACKUP_FILE" ]]; then
     TMP_RESTORE="/tmp/wp-restore-${DOMAIN_SAFE}-$(date +%s)"
     mkdir -p "$TMP_RESTORE"
 
-    tar -xzf "$BACKUP_FILE" -C "$TMP_RESTORE" 2>/dev/null
+    # age-verschlüsselt? → entschlüsseln
+    if [[ "$BACKUP_FILE" == *.age ]]; then
+        AGE_KEY="/etc/wp-hosting/backup-key.txt"
+        [[ ! -f "$AGE_KEY" ]] && err "Verschlüsseltes Backup, aber ${AGE_KEY} fehlt."
+        command -v age &>/dev/null || err "age nicht installiert."
+        info "Backup wird entschlüsselt..."
+        age -d -i "$AGE_KEY" "$BACKUP_FILE" | tar -xzf - -C "$TMP_RESTORE" 2>/dev/null
+    else
+        tar -xzf "$BACKUP_FILE" -C "$TMP_RESTORE" 2>/dev/null
+    fi
 
     # wp-content aus Backup ermitteln
     if [[ -d "${TMP_RESTORE}/wp-content" ]]; then
@@ -179,7 +190,7 @@ if $RESTORE_FILES && [[ -n "$BACKUP_FILE" ]]; then
         err "wp-content Verzeichnis nicht im Backup gefunden."
     fi
 
-    # Aktuelles wp-content sichern
+    # Aktuelles wp-content sichern (im äußeren Scope für Auto-Rollback)
     if [[ -d "$CONTENT_PATH" ]]; then
         ROLLBACK="${CONTENT_PATH}.rollback-$(date +%Y%m%d%H%M%S)"
         mv "$CONTENT_PATH" "$ROLLBACK"
@@ -213,8 +224,15 @@ if $RESTORE_DB && [[ -n "$SQL_FILE" ]]; then
             2>/dev/null || true
     fi
 
-    # Import
-    if [[ "$SQL_FILE" == *.gz ]]; then
+    # Import — age-verschlüsselt? → entschlüsseln
+    if [[ "$SQL_FILE" == *.age ]]; then
+        AGE_KEY="/etc/wp-hosting/backup-key.txt"
+        [[ ! -f "$AGE_KEY" ]] && err "Verschlüsselter SQL-Dump, aber ${AGE_KEY} fehlt."
+        command -v age &>/dev/null || err "age nicht installiert."
+        info "SQL-Dump wird entschlüsselt..."
+        age -d -i "$AGE_KEY" "$SQL_FILE" | zcat | \
+            mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME"
+    elif [[ "$SQL_FILE" == *.gz ]]; then
         zcat "$SQL_FILE" | mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME"
     else
         mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME" < "$SQL_FILE"
@@ -227,6 +245,38 @@ fi
 command -v wp &>/dev/null && wp cache flush --path="$SITE_PATH" --allow-root 2>/dev/null || true
 [[ -d /var/cache/nginx/wp ]] && rm -rf /var/cache/nginx/wp/* 2>/dev/null || true
 log "Caches geleert"
+
+# ── HTTP-Test & Auto-Rollback ─────────────────────────────────────────────
+# Maintenance-Mode liefert 503 → für den Test temporär deaktivieren
+info "Verifiziere Site..."
+rm -f "$MAINT_FLAG" 2>/dev/null || true
+sleep 1
+
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    --connect-timeout 5 --max-time 15 \
+    -H "Host: ${DOMAIN}" \
+    "http://127.0.0.1/" 2>/dev/null || echo "ERR")
+
+# Maintenance-Mode wieder aktivieren
+touch "$MAINT_FLAG" && chown "${SYSTEM_USER}:www-data" "$MAINT_FLAG" 2>/dev/null || true
+
+if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "301" || "$HTTP_CODE" == "302" ]]; then
+    log "HTTP-Test OK (${HTTP_CODE})"
+else
+    warn "HTTP-Test FEHLGESCHLAGEN (${HTTP_CODE})"
+    if $RESTORE_FILES && [[ -n "$ROLLBACK" && -d "$ROLLBACK" ]]; then
+        echo ""
+        read -rp "Auto-Rollback der Dateien durchführen? [j/N]: " do_rollback
+        if [[ "$do_rollback" == "j" || "$do_rollback" == "J" ]]; then
+            rm -rf "${SITE_PATH}/wp-content"
+            mv "$ROLLBACK" "${SITE_PATH}/wp-content"
+            chown -R "${SYSTEM_USER}:www-data" "${SITE_PATH}/wp-content"
+            log "Rollback durchgeführt — Site auf vorherigen Stand zurückgesetzt"
+        else
+            warn "Rollback übersprungen — Backup liegt unter: ${ROLLBACK}"
+        fi
+    fi
+fi
 
 # ── Ausgabe ───────────────────────────────────────────────────────────────
 echo ""

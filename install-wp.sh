@@ -13,6 +13,15 @@ info() { echo -e "${BLUE}[i]${NC} $1"; }
 [[ $EUID -ne 0 ]] && err "Als root ausführen: sudo bash install-wp.sh"
 [[ ! -f /etc/wp-hosting/config ]] && err "Konfiguration nicht gefunden. Bitte zuerst setup-web.sh ausführen."
 
+# ── Flags ─────────────────────────────────────────────────────────────────
+FORCE_RESUME=false
+for arg in "$@"; do
+    case "$arg" in
+        --resume|--force) FORCE_RESUME=true ;;
+        -h|--help) echo "Usage: install-wp.sh [--resume]"; echo "  --resume   Bestehende Reste vor Neuanlage entfernen (Cleanup)"; exit 0 ;;
+    esac
+done
+
 # ── Konfiguration laden ────────────────────────────────────────────────────
 source /etc/wp-hosting/config
 
@@ -81,8 +90,31 @@ PHP_POOL="/etc/php/8.3/fpm/pool.d/${DOMAIN}.conf"
 NGINX_VHOST="/etc/nginx/sites-available/${DOMAIN}"
 
 # ── Prüfen ob Site bereits existiert ─────────────────────────────────────
-[[ -d "$SITE_PATH" ]] && err "Verzeichnis ${SITE_PATH} existiert bereits."
-[[ -f "$NGINX_VHOST" ]] && err "Nginx-Vhost für ${DOMAIN} existiert bereits."
+if [[ -d "$SITE_PATH" || -f "$NGINX_VHOST" ]]; then
+    if $FORCE_RESUME; then
+        warn "Reste einer vorherigen Installation gefunden — werden entfernt (--resume)"
+        # Dieselbe Cleanup-Logik wie beim Trap, nur ohne Trap-Trigger:
+        rm -f "/etc/nginx/sites-enabled/${DOMAIN}" "/etc/nginx/sites-available/${DOMAIN}"
+        rm -f "/etc/php/8.3/fpm/pool.d/${DOMAIN}.conf"
+        rm -f "/etc/cron.d/wpcron-${DOMAIN_SAFE}"
+        SFTP_CHROOT="/var/sftp/wp_${DOMAIN_SAFE:0:20}"
+        if mountpoint -q "${SFTP_CHROOT}/site" 2>/dev/null; then umount "${SFTP_CHROOT}/site" || true; fi
+        sed -i "\|${SITE_PATH}.*${SFTP_CHROOT}/site|d" /etc/fstab 2>/dev/null || true
+        rm -rf "$SFTP_CHROOT" "$SITE_PATH"
+        id "wp_${DOMAIN_SAFE:0:20}" &>/dev/null && userdel "wp_${DOMAIN_SAFE:0:20}" 2>/dev/null || true
+        WEB_VM_IP_TMP=$(hostname -I | awk '{print $1}')
+        mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" 2>/dev/null <<SQL || true
+DROP DATABASE IF EXISTS \`wp_${DOMAIN_SAFE}\`;
+SQL
+        rm -f "/etc/wp-hosting/sites/${DOMAIN}.txt"
+        systemctl reload nginx 2>/dev/null || true
+        systemctl reload php8.3-fpm 2>/dev/null || true
+        log "Cleanup abgeschlossen — Installation startet neu"
+    else
+        [[ -d "$SITE_PATH" ]]   && err "Verzeichnis ${SITE_PATH} existiert bereits. (Tipp: --resume)"
+        [[ -f "$NGINX_VHOST" ]] && err "Nginx-Vhost für ${DOMAIN} existiert bereits. (Tipp: --resume)"
+    fi
+fi
 
 # ── Cleanup-Trap bei Fehler ───────────────────────────────────────────────
 # Wird bei set -e automatisch ausgelöst wenn ein Befehl fehlschlägt.
@@ -295,8 +327,20 @@ server {
         log_not_found off;
     }
 
-    location ~ /\.(ht|git|env) { deny all; }
-    location = /xmlrpc.php     { deny all; }
+    location ~ /\.(ht|git|env)            { deny all; }
+    location ~ /(wp-config\.php|readme\.html|license\.txt|wp-config-sample\.php)\$ { deny all; }
+    location ~* /(?:uploads|files)/.*\.php\$ { deny all; }
+    location = /xmlrpc.php                 { deny all; }
+
+    # OPcache-Status (Basic-Auth, gleiches Passwort wie phpMyAdmin)
+    location = /opcache-status {
+        auth_basic           "Restricted";
+        auth_basic_user_file /etc/nginx/.pma_htpasswd;
+        include              snippets/fastcgi-php.conf;
+        fastcgi_pass         unix:${SOCK};
+        fastcgi_param        SCRIPT_FILENAME /var/lib/wp-hosting/opcache-status.php;
+        include              fastcgi_params;
+    }
 
 $(if [[ -n "$ADMIN_IP" ]]; then
 cat <<IPEOF
@@ -377,8 +421,20 @@ server {
         log_not_found off;
     }
 
-    location ~ /\.(ht|git|env) { deny all; }
-    location = /xmlrpc.php     { deny all; }
+    location ~ /\.(ht|git|env)            { deny all; }
+    location ~ /(wp-config\.php|readme\.html|license\.txt|wp-config-sample\.php)\$ { deny all; }
+    location ~* /(?:uploads|files)/.*\.php\$ { deny all; }
+    location = /xmlrpc.php                 { deny all; }
+
+    # OPcache-Status (Basic-Auth, gleiches Passwort wie phpMyAdmin)
+    location = /opcache-status {
+        auth_basic           "Restricted";
+        auth_basic_user_file /etc/nginx/.pma_htpasswd;
+        include              snippets/fastcgi-php.conf;
+        fastcgi_pass         unix:${SOCK};
+        fastcgi_param        SCRIPT_FILENAME /var/lib/wp-hosting/opcache-status.php;
+        include              fastcgi_params;
+    }
 
 $(if [[ -n "$ADMIN_IP" ]]; then
 cat <<IPEOF

@@ -47,8 +47,29 @@ echo ""
 read -rp "Standard-Admin-E-Mail für WordPress-Sites: " WP_ADMIN_EMAIL
 [[ -z "$WP_ADMIN_EMAIL" ]] && err "E-Mail darf nicht leer sein."
 
-read -rp "IP-Adresse des Nginx Proxy Managers (für Real-IP): " NPM_IP
-[[ -z "$NPM_IP" ]] && NPM_IP="127.0.0.1"
+# NPM-IP Auto-Detection: erste IP im selben /24 wie diese VM, die :81 (NPM-Admin) öffnet
+# Nutzt /dev/tcp (Bash builtin) — keine externen Tools nötig
+NPM_IP_GUESS=""
+MY_IP=$(hostname -I | awk '{print $1}')
+if [[ -n "$MY_IP" ]]; then
+    SUBNET="${MY_IP%.*}"
+    info "Suche NPM im Subnetz ${SUBNET}.0/24 (Port 81)..."
+    for i in $(seq 1 254); do
+        CANDIDATE="${SUBNET}.${i}"
+        [[ "$CANDIDATE" == "$MY_IP" ]] && continue
+        if timeout 0.3 bash -c "</dev/tcp/${CANDIDATE}/81" 2>/dev/null; then
+            NPM_IP_GUESS="$CANDIDATE"
+            break
+        fi
+    done
+fi
+if [[ -n "$NPM_IP_GUESS" ]]; then
+    read -rp "IP-Adresse des Nginx Proxy Managers (Vorschlag: ${NPM_IP_GUESS}): " NPM_IP
+    [[ -z "$NPM_IP" ]] && NPM_IP="$NPM_IP_GUESS"
+else
+    read -rp "IP-Adresse des Nginx Proxy Managers (für Real-IP): " NPM_IP
+    [[ -z "$NPM_IP" ]] && NPM_IP="127.0.0.1"
+fi
 
 read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
 
@@ -106,7 +127,7 @@ info "System wird aktualisiert..."
 apt-get update -q
 DEBIAN_FRONTEND=noninteractive apt-get upgrade -yq
 DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
-    curl wget unzip git ca-certificates gnupg \
+    curl wget unzip git ca-certificates gnupg age \
     fail2ban ufw mysql-client \
     unattended-upgrades apt-listchanges \
     nginx redis-server \
@@ -536,20 +557,73 @@ systemctl enable filebrowser
 log "Filebrowser installiert (Port 8090)"
 
 # ── Fail2ban ─────────────────────────────────────────────────────────────
+# Filter: wp-login.php Brute-Force
+cat > /etc/fail2ban/filter.d/nginx-wp-login.conf <<'EOF'
+[Definition]
+failregex = ^<HOST> .* "POST /wp-login\.php
+ignoreregex =
+EOF
+
+# Filter: xmlrpc.php Angriffe (wir liefern 403 → jeder Hit ist verdächtig)
+cat > /etc/fail2ban/filter.d/nginx-wp-xmlrpc.conf <<'EOF'
+[Definition]
+failregex = ^<HOST> .* "(GET|POST) /xmlrpc\.php
+ignoreregex =
+EOF
+
+# Filter: PHP-Aufrufe in Uploads (typischer Webshell-Angriff)
+cat > /etc/fail2ban/filter.d/nginx-wp-noscript.conf <<'EOF'
+[Definition]
+failregex = ^<HOST> .* "(GET|POST) /wp-content/uploads/.*\.php
+            ^<HOST> .* "(GET|POST) /wp-content/.*\.php\?
+ignoreregex =
+EOF
+
+# Jails
 cat > /etc/fail2ban/jail.d/wordpress.conf <<'EOF'
+[DEFAULT]
+backend = polling
+
 [nginx-req-limit]
-enabled = true
-filter  = nginx-req-limit
-logpath = /var/log/nginx/*.error.log
+enabled  = true
+filter   = nginx-req-limit
+logpath  = /var/log/nginx/*.error.log
 maxretry = 10
 bantime  = 3600
 
+[nginx-wp-login]
+enabled  = true
+filter   = nginx-wp-login
+logpath  = /var/log/nginx/*.access.log
+port     = http,https
+maxretry = 5
+findtime = 600
+bantime  = 7200
+
+[nginx-wp-xmlrpc]
+enabled  = true
+filter   = nginx-wp-xmlrpc
+logpath  = /var/log/nginx/*.access.log
+port     = http,https
+maxretry = 2
+findtime = 600
+bantime  = 86400
+
+[nginx-wp-noscript]
+enabled  = true
+filter   = nginx-wp-noscript
+logpath  = /var/log/nginx/*.access.log
+port     = http,https
+maxretry = 1
+findtime = 600
+bantime  = 86400
+
 [sshd]
-enabled = true
+enabled  = true
 maxretry = 5
 bantime  = 3600
 EOF
-log "Fail2ban konfiguriert"
+log "Fail2ban konfiguriert (wp-login, xmlrpc, noscript Jails aktiv)"
 
 # ── SSH Hardening & SFTP ─────────────────────────────────────────────────
 SSH_CONFIG="/etc/ssh/sshd_config"
@@ -665,6 +739,7 @@ for CRED_FILE in "${SITES_DIR}"/*.txt; do
     $WP plugin update --all    2>>"$LOG" && \
     $WP theme update --all     2>>"$LOG" && \
     $WP core update-db         2>>"$LOG" && \
+    $WP transient delete --all 2>/dev/null && \
     $WP cache flush            2>/dev/null || true
     EXIT=$?
     rm -f "${SITE_PATH}/wp-content/.maintenance-active" 2>/dev/null || true
@@ -701,6 +776,33 @@ AUEOF
     log "Auto-Update-Cron aktiviert (sonntags 03:00 → /var/log/wp-auto-update.log)"
 fi
 
+# ── OPcache-Status PHP-Endpoint ───────────────────────────────────────────
+mkdir -p /var/lib/wp-hosting
+cat > /var/lib/wp-hosting/opcache-status.php <<'PHPEOF'
+<?php
+// OPcache-Status — wird per-Site über Nginx-Vhost mit Basic-Auth bereitgestellt
+header('Content-Type: text/plain; charset=utf-8');
+if (!function_exists('opcache_get_status')) { http_response_code(503); echo "OPcache not available\n"; exit; }
+$s = @opcache_get_status(false);
+if (!$s) { echo "OPcache disabled in this pool\n"; exit; }
+$mem   = $s['memory_usage']     ?? [];
+$stats = $s['opcache_statistics'] ?? [];
+$total_mem = ($mem['used_memory'] ?? 0) + ($mem['free_memory'] ?? 0) + ($mem['wasted_memory'] ?? 0);
+printf("OPcache:        %s\n", !empty($s['opcache_enabled']) ? 'enabled' : 'disabled');
+printf("Memory used:    %.1f / %.1f MB  (wasted: %.1f MB)\n",
+    ($mem['used_memory'] ?? 0)/1048576,
+    $total_mem/1048576,
+    ($mem['wasted_memory'] ?? 0)/1048576);
+printf("Hit rate:       %.2f%%\n", $stats['opcache_hit_rate'] ?? 0);
+printf("Hits / Misses:  %d / %d\n", $stats['hits'] ?? 0, $stats['misses'] ?? 0);
+printf("Cached files:   %d / %d (max keys)\n", $stats['num_cached_scripts'] ?? 0, $stats['max_cached_keys'] ?? 0);
+printf("Restarts:       oom=%d  hash=%d  manual=%d\n",
+    $stats['oom_restarts'] ?? 0, $stats['hash_restarts'] ?? 0, $stats['manual_restarts'] ?? 0);
+printf("Last restart:   %s\n", !empty($stats['last_restart_time']) ? date('Y-m-d H:i:s', $stats['last_restart_time']) : 'never');
+PHPEOF
+chmod 644 /var/lib/wp-hosting/opcache-status.php
+log "OPcache-Status-Endpoint angelegt (→ https://<domain>/opcache-status, Basic-Auth)"
+
 # ── WordPress Datei-Backup Script ────────────────────────────────────────
 BACKUP_LOCAL="/var/backups/wp-files"
 mkdir -p "$BACKUP_LOCAL"
@@ -721,6 +823,14 @@ ERRORS=0
 mkdir -p "\$BACKUP_DIR"
 echo "[\$(date '+%Y-%m-%d %H:%M')] Datei-Backup gestartet" >> "\$LOG"
 
+# Verschlüsselung: Wenn /etc/wp-hosting/backup-recipient.txt existiert,
+# wird jedes Backup mit age + Public-Key verschlüsselt (.tar.gz.age).
+RECIPIENT_FILE="/etc/wp-hosting/backup-recipient.txt"
+ENCRYPT=false
+if [[ -f "\$RECIPIENT_FILE" ]] && command -v age &>/dev/null; then
+    ENCRYPT=true
+fi
+
 for f in "\${SITES_DIR}"/*.txt; do
     [[ -f "\$f" ]] || continue
     DOMAIN=\$(basename "\$f" .txt)
@@ -729,24 +839,40 @@ for f in "\${SITES_DIR}"/*.txt; do
 
     [[ -d "\$CONTENT_PATH" ]] || continue
 
-    ARCHIVE="\${BACKUP_DIR}/\${DOMAIN}_\${DATE}.tar.gz"
-
-    if tar -czf "\$ARCHIVE" \
-        --exclude="\${CONTENT_PATH}/cache" \
-        --exclude="\${CONTENT_PATH}/upgrade" \
-        --exclude="\${CONTENT_PATH}/wflogs" \
-        -C "\$SITE_PATH" wp-content 2>/dev/null; then
-        SIZE=\$(du -sh "\$ARCHIVE" 2>/dev/null | cut -f1)
-        echo "[\$(date '+%Y-%m-%d %H:%M')] OK \${DOMAIN} (\${SIZE})" >> "\$LOG"
+    if \$ENCRYPT; then
+        ARCHIVE="\${BACKUP_DIR}/\${DOMAIN}_\${DATE}.tar.gz.age"
+        if tar -czf - \
+            --exclude="\${CONTENT_PATH}/cache" \
+            --exclude="\${CONTENT_PATH}/upgrade" \
+            --exclude="\${CONTENT_PATH}/wflogs" \
+            -C "\$SITE_PATH" wp-content 2>/dev/null \
+            | age -R "\$RECIPIENT_FILE" -o "\$ARCHIVE" 2>/dev/null; then
+            SIZE=\$(du -sh "\$ARCHIVE" 2>/dev/null | cut -f1)
+            echo "[\$(date '+%Y-%m-%d %H:%M')] OK \${DOMAIN} (\${SIZE}, verschlüsselt)" >> "\$LOG"
+        else
+            echo "[\$(date '+%Y-%m-%d %H:%M')] FEHLER \${DOMAIN}" >> "\$LOG"
+            ERRORS=\$((ERRORS + 1))
+        fi
     else
-        echo "[\$(date '+%Y-%m-%d %H:%M')] FEHLER \${DOMAIN}" >> "\$LOG"
-        ERRORS=\$((ERRORS + 1))
+        ARCHIVE="\${BACKUP_DIR}/\${DOMAIN}_\${DATE}.tar.gz"
+        if tar -czf "\$ARCHIVE" \
+            --exclude="\${CONTENT_PATH}/cache" \
+            --exclude="\${CONTENT_PATH}/upgrade" \
+            --exclude="\${CONTENT_PATH}/wflogs" \
+            -C "\$SITE_PATH" wp-content 2>/dev/null; then
+            SIZE=\$(du -sh "\$ARCHIVE" 2>/dev/null | cut -f1)
+            echo "[\$(date '+%Y-%m-%d %H:%M')] OK \${DOMAIN} (\${SIZE})" >> "\$LOG"
+        else
+            echo "[\$(date '+%Y-%m-%d %H:%M')] FEHLER \${DOMAIN}" >> "\$LOG"
+            ERRORS=\$((ERRORS + 1))
+        fi
     fi
 done
 
 # Remote-Sync
 if [[ -n "\${RCLONE_DEST:-}" ]] && command -v rclone &>/dev/null; then
-    if rclone sync "\$BACKUP_DIR" "\$RCLONE_DEST" --include "*_\${DATE}.tar.gz" 2>/dev/null; then
+    if rclone sync "\$BACKUP_DIR" "\$RCLONE_DEST" \
+        --include "*_\${DATE}.tar.gz" --include "*_\${DATE}.tar.gz.age" 2>/dev/null; then
         echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Sync OK → \${RCLONE_DEST}" >> "\$LOG"
     else
         echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Sync FEHLER" >> "\$LOG"
@@ -754,8 +880,9 @@ if [[ -n "\${RCLONE_DEST:-}" ]] && command -v rclone &>/dev/null; then
     fi
 fi
 
-# Alte lokale Backups löschen
-find "\$BACKUP_DIR" -name "*.tar.gz" -mtime +\${RETENTION_DAYS} -delete 2>/dev/null || true
+# Alte lokale Backups löschen (sowohl .tar.gz als auch .tar.gz.age)
+find "\$BACKUP_DIR" \( -name "*.tar.gz" -o -name "*.tar.gz.age" \) \
+    -mtime +\${RETENTION_DAYS} -delete 2>/dev/null || true
 
 echo "[\$(date '+%Y-%m-%d %H:%M')] Datei-Backup abgeschlossen (Fehler: \${ERRORS})" >> "\$LOG"
 
@@ -771,6 +898,18 @@ BACKUPEOF
 chmod +x /usr/local/bin/wp-backup-files.sh
 echo "0 2 * * * root /usr/local/bin/wp-backup-files.sh" > /etc/cron.d/wp-backup-files
 log "Datei-Backup eingerichtet (täglich 02:00 → ${BACKUP_LOCAL})"
+
+# Wöchentliche Backup-Verifikation (Sonntag 04:00 — nach Auto-Update)
+if [[ -f /usr/local/bin/backup-verify.sh ]] || [[ -f "$(dirname "$0")/backup-verify.sh" ]]; then
+    # Script-Pfad ermitteln und installieren
+    SRC_VERIFY="$(dirname "$0")/backup-verify.sh"
+    if [[ -f "$SRC_VERIFY" ]]; then
+        cp "$SRC_VERIFY" /usr/local/bin/backup-verify.sh
+        chmod +x /usr/local/bin/backup-verify.sh
+    fi
+    echo "0 4 * * 0 root /usr/local/bin/backup-verify.sh --quiet --notify" > /etc/cron.d/backup-verify
+    log "Backup-Verifikation eingerichtet (sonntags 04:00, Webhook bei Fehler)"
+fi
 
 # ── Disk Space Alert Script ───────────────────────────────────────────────
 cat > /usr/local/bin/disk-alert.sh <<'ALERTEOF'
@@ -925,6 +1064,33 @@ CFEOF
 chmod +x /usr/local/bin/cf-ip-update.sh
 echo "0 4 * * 1 root /usr/local/bin/cf-ip-update.sh" > /etc/cron.d/cf-ip-update
 log "Cloudflare IP Auto-Update eingerichtet (montags 04:00 Uhr)"
+
+# ── Backup-Verschlüsselung (age) ──────────────────────────────────────────
+# Optional: Backups vor Remote-Upload mit age verschlüsseln
+echo ""
+read -rp "Backups mit age verschlüsseln? [j/N]: " enc_choice
+if [[ "$enc_choice" == "j" || "$enc_choice" == "J" ]]; then
+    AGE_KEY_FILE="/etc/wp-hosting/backup-key.txt"
+    AGE_PUB_FILE="/etc/wp-hosting/backup-recipient.txt"
+
+    if [[ -f "$AGE_KEY_FILE" ]]; then
+        warn "age-Key existiert bereits — wird beibehalten"
+    else
+        age-keygen -o "$AGE_KEY_FILE" 2>/dev/null
+        chmod 600 "$AGE_KEY_FILE"
+        # Public-Key extrahieren
+        grep "^# public key:" "$AGE_KEY_FILE" | awk '{print $4}' > "$AGE_PUB_FILE"
+        chmod 644 "$AGE_PUB_FILE"
+        log "age-Keypair generiert: ${AGE_KEY_FILE}"
+        echo ""
+        echo -e "${YELLOW}${BOLD}WICHTIG:${NC} ${AGE_KEY_FILE} sicher aufbewahren (z.B. Passwort-Manager)!"
+        echo -e "${YELLOW}Ohne diesen Key sind Backups nicht wiederherstellbar.${NC}"
+        echo ""
+        cat "$AGE_KEY_FILE"
+        echo ""
+        read -rp "Drücke Enter wenn der Key gesichert ist..."
+    fi
+fi
 
 # Konfiguration speichern
 mkdir -p /etc/wp-hosting/plugins

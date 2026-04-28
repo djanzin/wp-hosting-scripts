@@ -168,6 +168,35 @@ echo -e "${BOLD}── Disk Usage (/var/www) ───────────�
 df -h /var/www | tail -1 | awk '{printf "  Belegt: %s von %s (%s)\n", $3, $2, $5}'
 echo ""
 
+# ── WP Doctor (nur wenn --doctor übergeben — sonst zu langsam) ───────────
+if [[ "${1:-}" == "--doctor" ]] || [[ "${2:-}" == "--doctor" ]]; then
+    if command -v wp &>/dev/null; then
+        # wp-cli doctor Package installieren falls nötig
+        if ! wp package list --allow-root 2>/dev/null | grep -q "doctor-command"; then
+            info "Installiere wp-doctor Package..."
+            wp package install wp-cli/doctor-command:@stable --allow-root 2>/dev/null || \
+                warn "wp-doctor konnte nicht installiert werden"
+        fi
+
+        echo -e "${BOLD}── WP Doctor ───────────────────────────────────${NC}"
+        for f in "${SITES_DIR}"/*.txt; do
+            DOMAIN=$(basename "$f" .txt)
+            SITE_PATH="/var/www/${DOMAIN}"
+            [[ ! -d "$SITE_PATH" ]] && continue
+
+            ISSUES=$(wp doctor check --all --path="$SITE_PATH" --allow-root --format=csv 2>/dev/null \
+                | tail -n +2 | awk -F',' '$2 == "error" || $2 == "warning" {print "  "$2": "$1" ("$3")"}' || true)
+            if [[ -n "$ISSUES" ]]; then
+                echo -e "${YELLOW}${DOMAIN}:${NC}"
+                echo "$ISSUES"
+            else
+                echo -e "${GREEN}${DOMAIN}:${NC} keine Probleme"
+            fi
+        done
+        echo ""
+    fi
+fi
+
 # ── Ergebnis & Webhook ────────────────────────────────────────────────────
 TOTAL=$((OK_COUNT + WARN_COUNT))
 

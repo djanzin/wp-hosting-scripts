@@ -42,7 +42,10 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL-Terminierung)
 | `health-check.sh` | Web-VM | HTTP, PHP-FPM, DB aller Sites prüfen | Bei Bedarf |
 | `reset-wp-admin.sh` | Web-VM | WordPress-Admin-Passwort zurücksetzen | Bei Bedarf |
 | `rotate-keys.sh` | Web-VM | WordPress Security Keys rotieren | Alle 3–6 Monate |
-| `restore-wp.sh` | Web-VM | WordPress-Site aus Backup wiederherstellen | Bei Bedarf |
+| `restore-wp.sh` | Web-VM | WordPress-Site aus Backup wiederherstellen (mit HTTP-Test + Auto-Rollback) | Bei Bedarf |
+| `backup-verify.sh` | Web-VM | Backup-Integrität prüfen (tar + age-Decrypt) | Wöchentlich (Cron) |
+| `status.sh` | Web-VM | Dashboard: Sites, Disk, Load, SSL, Updates, Backups | Bei Bedarf |
+| `tail-logs.sh` | Web-VM | Live-Logs einer Site (Nginx + PHP, farblich getrennt) | Bei Bedarf |
 | `db-backup.sh` | Datenbank-VM | Manuellen MariaDB-Dump erstellen | Bei Bedarf |
 
 ---
@@ -143,6 +146,10 @@ sudo bash maintenance.sh
 - Sprache: `en_US`, Zeitzone: `Europe/Berlin`, Datum: `Y-m-d H:i`
 - Permalinks: `/%category%/%postname%/`
 - Admin-Profil: Danijel Janzin, Spitzname Dany
+- **Vhost-Härtung:** `xmlrpc.php`, `wp-config.php`, `readme.html`, PHP in `/uploads/` blockiert
+- **Rate-Limit:** `wp-login.php` 1 r/s, Burst 3 (verhindert Brute-Force)
+- **fail2ban-Jails:** wp-login Brute-Force (5 Versuche → 2h Ban), xmlrpc (2 Hits → 24h Ban)
+- **OPcache-Status:** `https://<domain>/opcache-status` (Basic-Auth, gleiches Passwort wie phpMyAdmin)
 - `DISALLOW_FILE_EDIT`, `FORCE_SSL_ADMIN`, `WP_DEBUG false`
 - `WP_MEMORY_LIMIT 256M` / `WP_MAX_MEMORY_LIMIT 512M`
 - `WP_POST_REVISIONS 5`, `EMPTY_TRASH_DAYS 7`, `AUTOSAVE_INTERVAL 120`
@@ -200,6 +207,8 @@ sudo bash maintenance.sh
 | 🔴 SSL Fehler | Zertifikat läuft in < 2 Tagen ab (Erneuerung fehlgeschlagen) | Webhook (alle 6h) |
 | 🟢 SSL OK | Zertifikat nach Fehler erfolgreich erneuert | Webhook (Recovery) |
 | Auto-Update | Wöchentlicher Update-Lauf abgeschlossen | Webhook (sonntags 03:00) |
+| 🔴 Backup defekt | tar-Integrität oder age-Decrypt fehlgeschlagen | Webhook (sonntags 04:00) |
+| fail2ban | wp-login Brute-Force, xmlrpc, PHP in Uploads | IP-Ban (1h–24h) |
 
 Alle Alerts nutzen state-tracking — kein Spam, nur bei Zustandsänderung.
 Webhook-Format: **Uptime Kuma Push Monitor** (`GET ?status=up|down&msg=…`).
@@ -212,11 +221,17 @@ Webhook-Format: **Uptime Kuma Push Monitor** (`GET ?status=up|down&msg=…`).
 - Täglich 02:00: `wp-content/` als `.tar.gz` nach `/var/backups/wp-files/`
 - 7 Tage lokale Aufbewahrung
 - Optional: Remote-Upload via rclone (Cloudflare R2, S3, SFTP)
+- Optional: **age-Verschlüsselung** vor Remote-Upload (`.tar.gz.age`)
 
 ### Datenbank (DB-VM)
-- Täglich 02:00: Alle Datenbanken als komprimierter SQL-Dump nach `/var/backups/mysql/`
+- Täglich 02:00: **Pro Datenbank** ein eigener komprimierter SQL-Dump nach `/var/backups/mysql/<dbname>_<datum>.sql.gz`
 - 7 Tage lokale Aufbewahrung
 - Optional: Remote-Upload via rclone
+- Optional: **age-Verschlüsselung** vor Remote-Upload (`.sql.gz.age`)
+
+### Backup-Verifikation
+- Wöchentlich (Sonntag 04:00): `backup-verify.sh` prüft tar-Integrität, age-Entschlüsselbarkeit und SQL-Inhalt
+- Webhook-Alert bei beschädigten Backups
 
 ---
 

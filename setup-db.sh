@@ -24,6 +24,9 @@ read -rp "IPs der Web-VMs, kommagetrennt (z.B. 192.168.1.10,192.168.1.11): " WEB
 
 read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
 
+read -rp "age Public-Key für Backup-Verschlüsselung (leer = unverschlüsselt): " AGE_RECIPIENT
+[[ -n "$AGE_RECIPIENT" && ! "$AGE_RECIPIENT" =~ ^age1 ]] && err "Ungültiger age Public-Key (muss mit 'age1' beginnen)."
+
 echo ""
 echo "Remote-Backup für MariaDB-Dumps konfigurieren?"
 echo "  1) Cloudflare R2"
@@ -75,7 +78,7 @@ info "System wird aktualisiert..."
 apt-get update -q
 DEBIAN_FRONTEND=noninteractive apt-get upgrade -yq
 DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
-    curl wget ufw ca-certificates mariadb-server \
+    curl wget ufw ca-certificates mariadb-server age \
     unattended-upgrades apt-listchanges
 log "Pakete installiert"
 
@@ -304,42 +307,72 @@ mkdir -p /var/backups/mysql
 RCLONE_DEST_CFG="${RCLONE_DEST:-}"
 cat > /usr/local/bin/mysql-backup.sh <<BEOF
 #!/bin/bash
+# MariaDB Backup — pro DB ein eigener Dump (selektives Restore möglich)
+# Optional: Verschlüsselung mit age wenn /etc/wp-hosting/backup-recipient.txt existiert
 set -eo pipefail
 BACKUP_DIR="/var/backups/mysql"
 DATE=\$(date +%Y%m%d_%H%M)
 KEEP_DAYS=7
 LOG="/var/log/mysql-backup.log"
-OUTFILE="\${BACKUP_DIR}/all-databases_\${DATE}.sql.gz"
 RCLONE_DEST="${RCLONE_DEST_CFG}"
 ERRORS=0
+mkdir -p "\$BACKUP_DIR"
 
-echo "[\$(date '+%Y-%m-%d %H:%M')] Backup gestartet" >> "\$LOG"
-if mysqldump --all-databases --single-transaction --quick --lock-tables=false \
-    | gzip > "\$OUTFILE"; then
-    SIZE=\$(du -sh "\$OUTFILE" | cut -f1)
-    echo "[\$(date '+%Y-%m-%d %H:%M')] Lokal OK — \${SIZE}" >> "\$LOG"
+# Verschlüsselung aktiv?
+RECIPIENT_FILE="/etc/wp-hosting/backup-recipient.txt"
+ENCRYPT=false
+EXT="sql.gz"
+if [[ -f "\$RECIPIENT_FILE" ]] && command -v age &>/dev/null; then
+    ENCRYPT=true
+    EXT="sql.gz.age"
+fi
 
-    # Remote-Upload via rclone
-    if [[ -n "\$RCLONE_DEST" ]] && command -v rclone &>/dev/null; then
-        rclone copy "\$OUTFILE" "\$RCLONE_DEST" 2>> "\$LOG"
-        if [[ \$? -eq 0 ]]; then
-            echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Upload OK → \${RCLONE_DEST}" >> "\$LOG"
+echo "[\$(date '+%Y-%m-%d %H:%M')] Backup gestartet (encrypt=\$ENCRYPT)" >> "\$LOG"
+
+# Pro DB ein eigener Dump (System-DBs ausschließen)
+DB_LIST=\$(mysql -N -e "SHOW DATABASES;" 2>/dev/null | grep -Ev '^(information_schema|performance_schema|mysql|sys)\$' || true)
+
+for DB in \$DB_LIST; do
+    OUTFILE="\${BACKUP_DIR}/\${DB}_\${DATE}.\${EXT}"
+
+    if \$ENCRYPT; then
+        if mysqldump --single-transaction --quick --lock-tables=false "\$DB" \
+            | gzip | age -R "\$RECIPIENT_FILE" -o "\$OUTFILE" 2>/dev/null; then
+            SIZE=\$(du -sh "\$OUTFILE" | cut -f1)
+            echo "[\$(date '+%Y-%m-%d %H:%M')] OK \${DB} (\${SIZE}, verschlüsselt)" >> "\$LOG"
         else
-            echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Upload FEHLER!" >> "\$LOG"
+            echo "[\$(date '+%Y-%m-%d %H:%M')] FEHLER \${DB}" >> "\$LOG"
+            ERRORS=\$((ERRORS + 1))
+        fi
+    else
+        if mysqldump --single-transaction --quick --lock-tables=false "\$DB" \
+            | gzip > "\$OUTFILE"; then
+            SIZE=\$(du -sh "\$OUTFILE" | cut -f1)
+            echo "[\$(date '+%Y-%m-%d %H:%M')] OK \${DB} (\${SIZE})" >> "\$LOG"
+        else
+            echo "[\$(date '+%Y-%m-%d %H:%M')] FEHLER \${DB}" >> "\$LOG"
             ERRORS=\$((ERRORS + 1))
         fi
     fi
-else
-    echo "[\$(date '+%Y-%m-%d %H:%M')] FEHLER beim Backup!" >> "\$LOG"
-    ERRORS=\$((ERRORS + 1))
+done
+
+# Remote-Upload via rclone (nur die heutigen Dumps)
+if [[ -n "\$RCLONE_DEST" ]] && command -v rclone &>/dev/null; then
+    if rclone copy "\$BACKUP_DIR" "\$RCLONE_DEST" --include "*_\${DATE}.\${EXT}" 2>> "\$LOG"; then
+        echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Upload OK → \${RCLONE_DEST}" >> "\$LOG"
+    else
+        echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Upload FEHLER" >> "\$LOG"
+        ERRORS=\$((ERRORS + 1))
+    fi
 fi
 
-find "\$BACKUP_DIR" -name "*.sql.gz" -mtime +\${KEEP_DAYS} -delete
+# Alte Backups (verschlüsselt + unverschlüsselt) aufräumen
+find "\$BACKUP_DIR" \( -name "*.sql.gz" -o -name "*.sql.gz.age" \) -mtime +\${KEEP_DAYS} -delete 2>/dev/null || true
 
 # Webhook bei Fehler
 source /etc/wp-hosting/config 2>/dev/null || true
 if [[ \${ERRORS} -gt 0 ]] && [[ -n "\${WEBHOOK_URL:-}" ]]; then
-    MSG="Backup FEHLER: MariaDB-Backup fehlgeschlagen — \$(hostname -s)"
+    MSG="Backup FEHLER: \${ERRORS} MariaDB-Dump(s) fehlgeschlagen — \$(hostname -s)"
     curl -fsS -G --data-urlencode "msg=\${MSG}" "\${WEBHOOK_URL}?status=down" \
         -o /dev/null 2>/dev/null || true
 fi
@@ -354,6 +387,13 @@ cat > /etc/wp-hosting/config <<CFGEOF
 WEBHOOK_URL=${WEBHOOK_URL:-}
 CFGEOF
 chmod 600 /etc/wp-hosting/config
+
+# age-Recipient für Backup-Verschlüsselung speichern
+if [[ -n "${AGE_RECIPIENT:-}" ]]; then
+    echo "$AGE_RECIPIENT" > /etc/wp-hosting/backup-recipient.txt
+    chmod 644 /etc/wp-hosting/backup-recipient.txt
+    log "age Public-Key gespeichert — DB-Backups werden verschlüsselt"
+fi
 
 cat > /usr/local/bin/disk-alert.sh <<'ALERTEOF'
 #!/bin/bash
