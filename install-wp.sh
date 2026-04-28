@@ -15,11 +15,43 @@ info() { echo -e "${BLUE}[i]${NC} $1"; }
 
 # ── Flags ─────────────────────────────────────────────────────────────────
 FORCE_RESUME=false
-for arg in "$@"; do
-    case "$arg" in
+NON_INTERACTIVE=false
+CLI_DOMAIN=""
+CLI_TYPE=""
+CLI_ADMIN_IP=""
+CLI_SHOP_NAME=""
+i=0
+ARGS=("$@")
+while [[ $i -lt ${#ARGS[@]} ]]; do
+    case "${ARGS[$i]}" in
         --resume|--force) FORCE_RESUME=true ;;
-        -h|--help) echo "Usage: install-wp.sh [--resume]"; echo "  --resume   Bestehende Reste vor Neuanlage entfernen (Cleanup)"; exit 0 ;;
+        --yes|--non-interactive) NON_INTERACTIVE=true ;;
+        --domain)     i=$((i+1)); CLI_DOMAIN="${ARGS[$i]}" ;;
+        --type)       i=$((i+1)); CLI_TYPE="${ARGS[$i]}" ;;
+        --admin-ip)   i=$((i+1)); CLI_ADMIN_IP="${ARGS[$i]}" ;;
+        --shop-name)  i=$((i+1)); CLI_SHOP_NAME="${ARGS[$i]}" ;;
+        -h|--help)
+            cat <<HELP
+Usage: install-wp.sh [Optionen]
+
+Interaktiv (alle Eingaben werden abgefragt):
+  sudo bash install-wp.sh
+
+Non-Interaktiv (für Automation):
+  sudo bash install-wp.sh --domain example.com --type wordpress --yes
+  sudo bash install-wp.sh --domain shop.de --type woocommerce --shop-name "Mein Shop" --yes
+
+Optionen:
+  --domain <name>      Domain (z.B. meinshop.de)
+  --type <wp|woo>      'wordpress' oder 'woocommerce'
+  --admin-ip <ip>      WP-Admin-Zugang auf IP beschränken
+  --shop-name <name>   Shop-Name (nur bei WooCommerce)
+  --yes                Bestätigungs-Prompts überspringen
+  --resume             Reste einer abgebrochenen Installation entfernen
+HELP
+            exit 0 ;;
     esac
+    i=$((i+1))
 done
 
 # ── Konfiguration laden ────────────────────────────────────────────────────
@@ -35,31 +67,53 @@ info "VM-Typ: ${BOLD}${VM_TYPE}${NC} | DB-Host: ${BOLD}${DB_HOST}${NC}"
 echo ""
 
 # ── Eingaben ────────────────────────────────────────────────────────────────
-read -rp "Domain (ohne https://, z.B. meinshop.de): " DOMAIN
+if [[ -n "$CLI_DOMAIN" ]]; then
+    DOMAIN="$CLI_DOMAIN"
+else
+    read -rp "Domain (ohne https://, z.B. meinshop.de): " DOMAIN
+fi
 DOMAIN=$(echo "$DOMAIN" | tr '[:upper:]' '[:lower:]' | sed 's/^www\.//')
 [[ -z "$DOMAIN" ]] && err "Domain darf nicht leer sein."
 [[ ! "$DOMAIN" =~ ^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$ ]] && err "Ungültige Domain: ${DOMAIN}"
 
-echo ""
-echo "Welche Installation?"
-echo "  1) WordPress"
-echo "  2) WooCommerce"
-echo ""
-read -rp "Auswahl [1/2]: " site_choice
-case "$site_choice" in
-    1) SITE_TYPE="wordpress" ;;
-    2) SITE_TYPE="woocommerce" ;;
-    *) err "Ungültige Auswahl." ;;
-esac
+if [[ -n "$CLI_TYPE" ]]; then
+    case "$CLI_TYPE" in
+        wp|wordpress)         SITE_TYPE="wordpress" ;;
+        woo|woocommerce|wc)   SITE_TYPE="woocommerce" ;;
+        *) err "Ungültiger --type: ${CLI_TYPE} (erlaubt: wordpress, woocommerce)" ;;
+    esac
+else
+    echo ""
+    echo "Welche Installation?"
+    echo "  1) WordPress"
+    echo "  2) WooCommerce"
+    echo ""
+    read -rp "Auswahl [1/2]: " site_choice
+    case "$site_choice" in
+        1) SITE_TYPE="wordpress" ;;
+        2) SITE_TYPE="woocommerce" ;;
+        *) err "Ungültige Auswahl." ;;
+    esac
+fi
 
-echo ""
-read -rp "WP-Admin-Zugang auf bestimmte IP beschränken? (leer = kein Limit): " ADMIN_IP
+if [[ -n "$CLI_ADMIN_IP" ]]; then
+    ADMIN_IP="$CLI_ADMIN_IP"
+elif ! $NON_INTERACTIVE; then
+    echo ""
+    read -rp "WP-Admin-Zugang auf bestimmte IP beschränken? (leer = kein Limit): " ADMIN_IP
+else
+    ADMIN_IP=""
+fi
 
-# Shop-Name nur bei WooCommerce abfragen
+# Shop-Name nur bei WooCommerce
 WOO_SHOP_NAME=""
 if [[ "$SITE_TYPE" == "woocommerce" ]]; then
-    echo ""
-    read -rp "Shop-Name für E-Mail-Versand (leer = Domain): " WOO_SHOP_NAME
+    if [[ -n "$CLI_SHOP_NAME" ]]; then
+        WOO_SHOP_NAME="$CLI_SHOP_NAME"
+    elif ! $NON_INTERACTIVE; then
+        echo ""
+        read -rp "Shop-Name für E-Mail-Versand (leer = Domain): " WOO_SHOP_NAME
+    fi
     [[ -z "$WOO_SHOP_NAME" ]] && WOO_SHOP_NAME="$DOMAIN"
 fi
 
@@ -69,8 +123,10 @@ info "Typ:       ${BOLD}${SITE_TYPE}${NC}"
 [[ -n "$ADMIN_IP" ]]       && info "Admin-IP:  ${BOLD}${ADMIN_IP}${NC}"
 [[ -n "$WOO_SHOP_NAME" ]]  && info "Shop-Name: ${BOLD}${WOO_SHOP_NAME}${NC}"
 echo ""
-read -rp "Installation starten? [j/N]: " confirm
-[[ "$confirm" != "j" && "$confirm" != "J" ]] && err "Abgebrochen."
+if ! $NON_INTERACTIVE; then
+    read -rp "Installation starten? [j/N]: " confirm
+    [[ "$confirm" != "j" && "$confirm" != "J" ]] && err "Abgebrochen."
+fi
 
 # ── Zugangsdaten generieren ────────────────────────────────────────────────
 # Sanitized Domain für Systemnamen (nur Buchstaben/Zahlen)
@@ -88,6 +144,43 @@ SITE_PATH="/var/www/${DOMAIN}"
 SYSTEM_USER="wp_${DOMAIN_SAFE:0:20}"
 PHP_POOL="/etc/php/8.3/fpm/pool.d/${DOMAIN}.conf"
 NGINX_VHOST="/etc/nginx/sites-available/${DOMAIN}"
+
+# ── Pre-Flight-Checks ─────────────────────────────────────────────────────
+# Frühe Validierung — verhindert dass die Installation mittendrin scheitert
+info "Pre-Flight-Check..."
+
+# DNS auflösbar?
+if command -v dig &>/dev/null; then
+    DNS_RESULT=$(dig +short +time=3 +tries=1 "$DOMAIN" 2>/dev/null | head -1)
+    if [[ -z "$DNS_RESULT" ]]; then
+        warn "  DNS: ${DOMAIN} ist nicht auflösbar (Cloudflare A-Record fehlt?)"
+        $NON_INTERACTIVE || { read -rp "Trotzdem fortfahren? [j/N]: " ans; [[ "$ans" != "j" && "$ans" != "J" ]] && err "Abgebrochen."; }
+    else
+        log "  DNS: ${DOMAIN} → ${DNS_RESULT}"
+    fi
+fi
+
+# DB erreichbar?
+if ! mysqladmin ping -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" --silent 2>/dev/null; then
+    err "  DB-Host ${DB_HOST} nicht erreichbar oder Credentials falsch."
+fi
+log "  DB: ${DB_HOST} erreichbar"
+
+# Disk-Space (mind. 1 GB frei in /var/www)
+FREE_MB=$(df -m /var/www 2>/dev/null | tail -1 | awk '{print $4}')
+if [[ -n "$FREE_MB" && "$FREE_MB" -lt 1024 ]]; then
+    err "  Disk-Space: nur ${FREE_MB} MB frei in /var/www (mind. 1 GB nötig)"
+fi
+log "  Disk: ${FREE_MB} MB frei"
+
+# NPM erreichbar?
+if [[ -n "${NPM_IP:-}" ]] && [[ "$NPM_IP" != "127.0.0.1" ]]; then
+    if timeout 2 bash -c "</dev/tcp/${NPM_IP}/81" 2>/dev/null; then
+        log "  NPM: ${NPM_IP}:81 erreichbar"
+    else
+        warn "  NPM: ${NPM_IP}:81 NICHT erreichbar — Proxy-Host muss manuell angelegt werden"
+    fi
+fi
 
 # ── Prüfen ob Site bereits existiert ─────────────────────────────────────
 if [[ -d "$SITE_PATH" || -f "$NGINX_VHOST" ]]; then
@@ -215,6 +308,11 @@ pm               = static
 pm.max_children  = ${MAX_CHILDREN}
 pm.max_requests  = 500
 
+; Status-Endpoint für Pool-Monitoring (über nginx /fpm-status, Basic-Auth)
+pm.status_path   = /fpm-status
+ping.path        = /fpm-ping
+ping.response    = pong
+
 php_admin_value[memory_limit]         = 512M
 php_admin_value[upload_max_filesize]  = 128M
 php_admin_value[post_max_size]        = 128M
@@ -252,6 +350,11 @@ pm.start_servers     = ${START}
 pm.min_spare_servers = 1
 pm.max_spare_servers = $((START + 1))
 pm.max_requests      = 500
+
+; Status-Endpoint für Pool-Monitoring (über nginx /fpm-status, Basic-Auth)
+pm.status_path       = /fpm-status
+ping.path            = /fpm-ping
+ping.response        = pong
 
 php_admin_value[memory_limit]         = 256M
 php_admin_value[upload_max_filesize]  = 64M
@@ -349,6 +452,21 @@ server {
         include              fastcgi_params;
     }
 
+    # PHP-FPM Pool-Status (Basic-Auth, gleiches Passwort wie phpMyAdmin)
+    location = /fpm-status {
+        auth_basic           "Restricted";
+        auth_basic_user_file /etc/nginx/.pma_htpasswd;
+        fastcgi_pass         unix:${SOCK};
+        fastcgi_param        SCRIPT_FILENAME \$fastcgi_script_name;
+        include              fastcgi_params;
+    }
+    location = /fpm-ping {
+        access_log           off;
+        fastcgi_pass         unix:${SOCK};
+        fastcgi_param        SCRIPT_FILENAME \$fastcgi_script_name;
+        include              fastcgi_params;
+    }
+
 $(if [[ -n "$ADMIN_IP" ]]; then
 cat <<IPEOF
     location /wp-admin/ {
@@ -440,6 +558,21 @@ server {
         include              snippets/fastcgi-php.conf;
         fastcgi_pass         unix:${SOCK};
         fastcgi_param        SCRIPT_FILENAME /var/lib/wp-hosting/opcache-status.php;
+        include              fastcgi_params;
+    }
+
+    # PHP-FPM Pool-Status (Basic-Auth, gleiches Passwort wie phpMyAdmin)
+    location = /fpm-status {
+        auth_basic           "Restricted";
+        auth_basic_user_file /etc/nginx/.pma_htpasswd;
+        fastcgi_pass         unix:${SOCK};
+        fastcgi_param        SCRIPT_FILENAME \$fastcgi_script_name;
+        include              fastcgi_params;
+    }
+    location = /fpm-ping {
+        access_log           off;
+        fastcgi_pass         unix:${SOCK};
+        fastcgi_param        SCRIPT_FILENAME \$fastcgi_script_name;
         include              fastcgi_params;
     }
 

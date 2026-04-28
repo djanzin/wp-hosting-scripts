@@ -223,10 +223,29 @@ query_cache_type              = 0
 slow_query_log                = 1
 slow_query_log_file           = /var/log/mysql/slow.log
 long_query_time               = 2
+log_queries_not_using_indexes = 0
+
+# SSD-Tuning (moderne NVMe/SSD verträgt mehr IOPS)
+innodb_io_capacity            = 2000
+innodb_io_capacity_max        = 4000
+
+# Große WP-Imports (Migrations, große Mediatheken)
+max_allowed_packet            = 256M
+
+# Open-Files (viele Tabellen × file_per_table benötigen viele FDs)
+open_files_limit              = 65535
 
 # Netzwerk — lauscht auf allen Interfaces für Remote-Zugriff
 bind-address                  = 0.0.0.0
 EOF
+
+# systemd-Limits anpassen (sonst greift open_files_limit nicht)
+mkdir -p /etc/systemd/system/mariadb.service.d
+cat > /etc/systemd/system/mariadb.service.d/limits.conf <<EOF
+[Service]
+LimitNOFILE=65535
+EOF
+systemctl daemon-reload
 log "MariaDB konfiguriert (InnoDB Buffer: ${IB_POOL}, ${IB_INSTANCES} Instanz(en))"
 
 # ── MariaDB sichern & Admin-User anlegen ───────────────────────────────────
@@ -379,8 +398,9 @@ if [[ \${ERRORS} -gt 0 ]] && [[ -n "\${WEBHOOK_URL:-}" ]]; then
 fi
 BEOF
 chmod +x /usr/local/bin/mysql-backup.sh
-echo "0 2 * * * root /usr/local/bin/mysql-backup.sh" > /etc/cron.d/mysql-backup
-log "MariaDB Backup-Cron konfiguriert (täglich 02:00 → /var/backups/mysql, 7 Tage)"
+# flock verhindert parallele Läufe bei langlaufenden Dumps
+echo "0 2 * * * root /usr/bin/flock -n /var/lock/mysql-backup.lock /usr/local/bin/mysql-backup.sh" > /etc/cron.d/mysql-backup
+log "MariaDB Backup-Cron konfiguriert (täglich 02:00, flock-protected → /var/backups/mysql, 7 Tage)"
 
 # ── Disk Space Alert Script ───────────────────────────────────────────────
 mkdir -p /etc/wp-hosting /var/lib/wp-hosting/disk-state

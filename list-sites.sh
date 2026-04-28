@@ -26,7 +26,7 @@ fi
 
 TOTAL=0; RUNNING=0; ISSUES=0
 
-printf "  %-35s %-14s %-12s %-8s %-8s %-8s\n" "DOMAIN" "TYP" "STATUS" "NGINX" "PHP-FPM" "REDIS"
+printf "  %-30s %-12s %-12s %-7s %-7s %-7s\n" "DOMAIN" "TYP" "STATUS" "FILES" "DB" "SVCS"
 echo "  $(printf '%.0s─' {1..90})"
 
 for CRED_FILE in "${SITES_DIR}"/*.txt; do
@@ -34,40 +34,41 @@ for CRED_FILE in "${SITES_DIR}"/*.txt; do
     SITE_PATH="/var/www/${DOMAIN}"
 
     TYPE=$(grep "^Typ:" "$CRED_FILE" 2>/dev/null | awk '{print $2}' || echo "?")
+    DB_NAME=$(grep "^DB-Name:" "$CRED_FILE" 2>/dev/null | awk '{print $2}' || echo "")
 
     # Maintenance Mode?
     if [[ -f "${SITE_PATH}/wp-content/.maintenance-active" ]]; then
-        MAINT_STATUS="${YELLOW}[MAINTENANCE]${NC}"
+        MAINT_STATUS="${YELLOW}[MAINT]${NC}"
     else
-        MAINT_STATUS="${GREEN}[LIVE]${NC}"
+        MAINT_STATUS="${GREEN}[LIVE] ${NC}"
         RUNNING=$((RUNNING + 1))
     fi
 
-    # Nginx-Vhost aktiv?
-    if [[ -L "/etc/nginx/sites-enabled/${DOMAIN}" ]]; then
-        NGINX_STATUS="${GREEN}✓${NC}"
-    else
-        NGINX_STATUS="${RED}✗${NC}"
-        ISSUES=$((ISSUES + 1))
+    # Files-Größe
+    FILES_SIZE=$( [[ -d "$SITE_PATH" ]] && du -sh "$SITE_PATH" 2>/dev/null | awk '{print $1}' || echo "—")
+
+    # DB-Größe
+    DB_SIZE="—"
+    if [[ -n "$DB_NAME" ]]; then
+        DB_BYTES=$(mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" -N -B \
+            -e "SELECT COALESCE(SUM(data_length+index_length),0) FROM information_schema.tables WHERE table_schema='${DB_NAME}';" 2>/dev/null || echo "0")
+        if [[ "$DB_BYTES" -gt 0 ]]; then
+            DB_SIZE=$(awk -v b="$DB_BYTES" 'BEGIN { if (b<1048576) printf "%dK", b/1024; else if (b<1073741824) printf "%.0fM", b/1048576; else printf "%.1fG", b/1073741824 }')
+        fi
     fi
 
-    # PHP-FPM Socket vorhanden?
-    if [[ -S "/run/php/php8.3-fpm-${DOMAIN}.sock" ]]; then
-        PHP_STATUS="${GREEN}✓${NC}"
-    else
-        PHP_STATUS="${RED}✗${NC}"
-        ISSUES=$((ISSUES + 1))
-    fi
-
-    # Redis erreichbar?
+    # Service-Indikatoren (kompakt: nginx/php-fpm)
+    SVC=""
+    [[ -L "/etc/nginx/sites-enabled/${DOMAIN}" ]] && SVC="${SVC}${GREEN}N${NC}" || { SVC="${SVC}${RED}N${NC}"; ISSUES=$((ISSUES+1)); }
+    [[ -S "/run/php/php8.3-fpm-${DOMAIN}.sock" ]] && SVC="${SVC}${GREEN}P${NC}" || { SVC="${SVC}${RED}P${NC}"; ISSUES=$((ISSUES+1)); }
     if command -v redis-cli &>/dev/null && redis-cli ping &>/dev/null; then
-        REDIS_STATUS="${GREEN}✓${NC}"
+        SVC="${SVC}${GREEN}R${NC}"
     else
-        REDIS_STATUS="${RED}✗${NC}"
+        SVC="${SVC}${RED}R${NC}"
     fi
 
-    printf "  %-35s %-14s " "$DOMAIN" "$TYPE"
-    echo -e "${MAINT_STATUS}  ${NGINX_STATUS}       ${PHP_STATUS}       ${REDIS_STATUS}"
+    printf "  %-30s %-12s " "$DOMAIN" "$TYPE"
+    echo -e "${MAINT_STATUS}  ${FILES_SIZE}     ${DB_SIZE}     ${SVC}"
 
     TOTAL=$((TOTAL + 1))
 done
@@ -75,6 +76,7 @@ done
 echo ""
 echo "  Gesamt: ${BOLD}${TOTAL}${NC} Sites | Live: ${BOLD}${RUNNING}${NC} | Maintenance: ${BOLD}$((TOTAL - RUNNING))${NC}"
 [[ $ISSUES -gt 0 ]] && echo -e "  ${YELLOW}Hinweis: ${ISSUES} Problem(e) erkannt — Nginx/PHP-FPM prüfen.${NC}"
+echo -e "  ${BLUE}SVCS: N=Nginx P=PHP-FPM R=Redis (grün=OK, rot=Problem)${NC}"
 
 # VM-Status
 echo ""

@@ -585,10 +585,17 @@ failregex = ^<HOST> .* "(GET|POST) /wp-content/uploads/.*\.php
 ignoreregex =
 EOF
 
+# Cloudflare-IPs als ignoreip — verhindert dass fail2ban Cloudflare-Edge-IPs bant
+# (würde sonst die Site für ALLE CF-User blocken). Echter X-Forwarded-For-User wird
+# durch nginx real_ip_recursive korrekt extrahiert und vom richtigen Jail erfasst.
+CF_IGNOREIP=$(echo "${CF_IPS_V4} ${CF_IPS_V6}" | tr '\n' ' ')
+
 # Jails
-cat > /etc/fail2ban/jail.d/wordpress.conf <<'EOF'
+cat > /etc/fail2ban/jail.d/wordpress.conf <<EOF
 [DEFAULT]
 backend = polling
+# Cloudflare IPv4/IPv6 Ranges + localhost + Web-VM selbst
+ignoreip = 127.0.0.1/8 ::1 ${NPM_IP} ${CF_IGNOREIP}
 
 [nginx-req-limit]
 enabled  = true
@@ -734,12 +741,30 @@ UPDATED=0; FAILED=0
 
 echo "[$(date '+%Y-%m-%d %H:%M')] Auto-Update gestartet" >> "$LOG"
 
+PRE_DIR="/var/backups/wp-pre-update"
+mkdir -p "$PRE_DIR"
+
 for CRED_FILE in "${SITES_DIR}"/*.txt; do
     DOMAIN=$(basename "$CRED_FILE" .txt)
     SITE_PATH="/var/www/${DOMAIN}"
     [[ ! -d "$SITE_PATH" ]] && continue
 
     WP="wp --path=${SITE_PATH} --allow-root"
+
+    # Pre-Update-Snapshot (Files + DB)
+    PRE_TS=$(date +%Y%m%d_%H%M%S)
+    DB_NAME=$(grep "^DB-Name:" "$CRED_FILE" | awk '{print $2}')
+    DB_USER=$(grep "^DB-User:" "$CRED_FILE" | awk '{print $2}')
+    DB_PASS=$(grep "^DB-Pass:" "$CRED_FILE" | awk '{print $2}')
+    tar -czf "${PRE_DIR}/${DOMAIN}_${PRE_TS}.tar.gz" --exclude="wp-content/cache" \
+        --exclude="wp-content/upgrade" -C "$SITE_PATH" wp-content 2>/dev/null || true
+    [[ -n "$DB_NAME" ]] && MYSQL_PWD="$DB_PASS" mysqldump -h "$DB_HOST" -u "$DB_USER" \
+        --single-transaction --quick "$DB_NAME" 2>/dev/null \
+        | gzip > "${PRE_DIR}/${DOMAIN}_${PRE_TS}.sql.gz" || true
+    # Retention: 5 letzte pro Domain
+    ls -t "${PRE_DIR}/${DOMAIN}_"*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
+    ls -t "${PRE_DIR}/${DOMAIN}_"*.sql.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
+
     touch "${SITE_PATH}/wp-content/.maintenance-active" 2>/dev/null || true
     $WP core update            2>>"$LOG" && \
     $WP plugin update --all    2>>"$LOG" && \
@@ -778,7 +803,7 @@ if [[ -n "${WEBHOOK_URL:-}" ]]; then
 fi
 AUEOF
     chmod +x /usr/local/bin/wp-auto-update.sh
-    echo "0 3 * * 0 root /usr/local/bin/wp-auto-update.sh" > /etc/cron.d/wp-auto-update
+    echo "0 3 * * 0 root /usr/bin/flock -n /var/lock/wp-auto-update.lock /usr/local/bin/wp-auto-update.sh" > /etc/cron.d/wp-auto-update
     log "Auto-Update-Cron aktiviert (sonntags 03:00 → /var/log/wp-auto-update.log)"
 fi
 
@@ -904,8 +929,9 @@ fi
 BACKUPEOF
 
 chmod +x /usr/local/bin/wp-backup-files.sh
-echo "0 2 * * * root /usr/local/bin/wp-backup-files.sh" > /etc/cron.d/wp-backup-files
-log "Datei-Backup eingerichtet (täglich 02:00 → ${BACKUP_LOCAL})"
+# flock verhindert parallele Läufe wenn ein Backup länger als 24h dauert
+echo "0 2 * * * root /usr/bin/flock -n /var/lock/wp-backup-files.lock /usr/local/bin/wp-backup-files.sh" > /etc/cron.d/wp-backup-files
+log "Datei-Backup eingerichtet (täglich 02:00, flock-protected → ${BACKUP_LOCAL})"
 
 # Wöchentliche Backup-Verifikation (Sonntag 04:00 — nach Auto-Update)
 if [[ -f /usr/local/bin/backup-verify.sh ]] || [[ -f "$(dirname "$0")/backup-verify.sh" ]]; then

@@ -14,6 +14,8 @@ info() { echo -e "${BLUE}[i]${NC} $1"; }
 [[ ! -f /etc/wp-hosting/config ]] && err "Konfiguration nicht gefunden. Bitte zuerst setup-web.sh ausführen."
 command -v wp &>/dev/null || err "WP-CLI nicht gefunden."
 
+source /etc/wp-hosting/config
+
 clear
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════╗"
@@ -100,6 +102,31 @@ for DOMAIN in "${SITES_TO_UPDATE[@]}"; do
     # Maintenance Mode aktivieren (custom flag — zeigt eigene Seite)
     MAINT_FLAG="${SITE_PATH}/wp-content/.maintenance-active"
     touch "$MAINT_FLAG" && chown "${SYSTEM_USER}:www-data" "$MAINT_FLAG" 2>/dev/null || true
+
+    # ── Pre-Update-Snapshot ──────────────────────────────────────────────
+    # Schneller Snapshot vor jedem Update — bei Fehler verfügbar zum Rollback.
+    # Nach erfolgreichem Update automatisch entfernt (max. 5 letzte werden behalten).
+    PRE_DIR="/var/backups/wp-pre-update"
+    mkdir -p "$PRE_DIR"
+    PRE_TS=$(date +%Y%m%d_%H%M%S)
+    PRE_FILES="${PRE_DIR}/${DOMAIN}_${PRE_TS}.tar.gz"
+    PRE_DB="${PRE_DIR}/${DOMAIN}_${PRE_TS}.sql.gz"
+    DB_NAME=$(grep "^DB-Name:" "/etc/wp-hosting/sites/${DOMAIN}.txt" 2>/dev/null | awk '{print $2}' || echo "")
+    DB_USER=$(grep "^DB-User:" "/etc/wp-hosting/sites/${DOMAIN}.txt" 2>/dev/null | awk '{print $2}' || echo "")
+    DB_PASS=$(grep "^DB-Pass:" "/etc/wp-hosting/sites/${DOMAIN}.txt" 2>/dev/null | awk '{print $2}' || echo "")
+
+    info "  Pre-Update-Snapshot..."
+    tar -czf "$PRE_FILES" --exclude="wp-content/cache" --exclude="wp-content/upgrade" \
+        -C "$SITE_PATH" wp-content 2>/dev/null || warn "  Files-Snapshot fehlgeschlagen"
+    if [[ -n "$DB_NAME" ]]; then
+        MYSQL_PWD="$DB_PASS" mysqldump -h "${DB_HOST:-localhost}" -u "$DB_USER" \
+            --single-transaction --quick "$DB_NAME" 2>/dev/null \
+            | gzip > "$PRE_DB" || warn "  DB-Snapshot fehlgeschlagen"
+    fi
+
+    # Retention: nur die 5 letzten Snapshots pro Domain behalten
+    ls -t "${PRE_DIR}/${DOMAIN}_"*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
+    ls -t "${PRE_DIR}/${DOMAIN}_"*.sql.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
 
     if $UPDATE_CORE; then
         if $WP_CMD core update 2>&1 | grep -qE "Success|already"; then

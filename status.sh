@@ -61,8 +61,8 @@ echo ""
 # ── Sites ─────────────────────────────────────────────────────────────────
 if [[ -n "$(ls -A "$SITES_DIR" 2>/dev/null)" ]]; then
     echo -e "${BOLD}── Sites ─────────────────────────────────────────────────────${NC}"
-    printf "  %-30s %-12s %-8s %-12s\n" "Domain" "Status" "SSL" "Disk"
-    echo "  ───────────────────────────────────────────────────────────"
+    printf "  %-30s %-10s %-6s %-8s %-8s\n" "Domain" "Status" "SSL" "Files" "DB"
+    echo "  ─────────────────────────────────────────────────────────────────"
 
     LIVE=0; MAINT=0
     for f in "$SITES_DIR"/*.txt; do
@@ -88,15 +88,26 @@ if [[ -n "$(ls -A "$SITES_DIR" 2>/dev/null)" ]]; then
             SSL="${BLUE}—${NC}"
         fi
 
-        # Disk
+        # Files-Größe
         if [[ -d "$SITE_PATH" ]]; then
-            DISK=$(du -sh "$SITE_PATH" 2>/dev/null | awk '{print $1}')
+            FILES=$(du -sh "$SITE_PATH" 2>/dev/null | awk '{print $1}')
         else
-            DISK="—"
+            FILES="—"
+        fi
+
+        # DB-Größe (per information_schema)
+        DB_NAME=$(grep "^DB-Name:" "$f" 2>/dev/null | awk '{print $2}')
+        DB_SIZE="—"
+        if [[ -n "$DB_NAME" ]]; then
+            DB_BYTES=$(mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" -N -B \
+                -e "SELECT COALESCE(SUM(data_length+index_length),0) FROM information_schema.tables WHERE table_schema='${DB_NAME}';" 2>/dev/null || echo "0")
+            if [[ "$DB_BYTES" -gt 0 ]]; then
+                DB_SIZE=$(awk -v b="$DB_BYTES" 'BEGIN { if (b<1048576) printf "%dK", b/1024; else if (b<1073741824) printf "%.0fM", b/1048576; else printf "%.1fG", b/1073741824 }')
+            fi
         fi
 
         printf "  %-30s " "$DOMAIN"
-        echo -e "${STATUS}        ${SSL}      ${DISK}"
+        echo -e "${STATUS}      ${SSL}    ${FILES}     ${DB_SIZE}"
     done
     echo ""
     echo -e "  ${GREEN}${LIVE} LIVE${NC} | ${YELLOW}${MAINT} MAINT${NC} | Total: $((LIVE + MAINT))"

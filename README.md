@@ -46,6 +46,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL-Terminierung)
 | `backup-verify.sh` | Web-VM | Backup-Integrität prüfen (tar + age-Decrypt) | Wöchentlich (Cron) |
 | `status.sh` | Web-VM | Dashboard: Sites, Disk, Load, SSL, Updates, Backups | Bei Bedarf |
 | `tail-logs.sh` | Web-VM | Live-Logs einer Site (Nginx + PHP, farblich getrennt) | Bei Bedarf |
+| `audit-plugins.sh` | Web-VM | Plugin-/Site-Audit: veraltete/inaktive Plugins, Admin-User, DB-Bloat | Monatlich |
 | `db-backup.sh` | Datenbank-VM | Manuellen MariaDB-Dump erstellen | Bei Bedarf |
 
 ---
@@ -118,6 +119,12 @@ Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 
 > **Tipp:** Bei abgebrochener Installation (z.B. Netzwerkfehler beim Plugin-Download) kann mit `sudo bash install-wp.sh --resume` ein sauberer Neustart erzwungen werden — Reste der vorherigen Installation werden vor dem Neuversuch automatisch entfernt.
 
+> **Non-Interactive (für Automation/Ansible):**
+> ```bash
+> sudo bash install-wp.sh --domain example.com --type wordpress --yes
+> sudo bash install-wp.sh --domain shop.de --type woocommerce --shop-name "Mein Shop" --admin-ip 1.2.3.4 --yes
+> ```
+
 ---
 
 ### Schritt 6 — Site freischalten
@@ -152,6 +159,7 @@ sudo bash maintenance.sh
 - **Rate-Limit:** `wp-login.php` 1 r/s, Burst 3 (verhindert Brute-Force)
 - **fail2ban-Jails:** wp-login Brute-Force (5 Versuche → 2h Ban), xmlrpc (2 Hits → 24h Ban)
 - **OPcache-Status:** `https://<domain>/opcache-status` (Basic-Auth, gleiches Passwort wie phpMyAdmin)
+- **PHP-FPM Pool-Status:** `https://<domain>/fpm-status` (Basic-Auth) zeigt aktive/idle Worker, Queue-Tiefe, peak children
 - `DISALLOW_FILE_EDIT`, `FORCE_SSL_ADMIN`, `WP_DEBUG false`
 - `WP_MEMORY_LIMIT 256M` / `WP_MAX_MEMORY_LIMIT 512M`
 - `WP_POST_REVISIONS 5`, `EMPTY_TRASH_DAYS 7`, `AUTOSAVE_INTERVAL 120`
@@ -234,6 +242,13 @@ Webhook-Format: **Uptime Kuma Push Monitor** (`GET ?status=up|down&msg=…`).
 ### Backup-Verifikation
 - Wöchentlich (Sonntag 04:00): `backup-verify.sh` prüft tar-Integrität, age-Entschlüsselbarkeit und SQL-Inhalt
 - Webhook-Alert bei beschädigten Backups
+- Alle Backup-Crons mit `flock` geschützt (kein paralleler Lauf bei langlaufenden Backups)
+
+### Pre-Update-Snapshots
+- Vor jedem WordPress-Update wird automatisch ein Schnell-Snapshot (Files + DB) angelegt
+- Speicherort: `/var/backups/wp-pre-update/<domain>_<timestamp>.{tar.gz,sql.gz}`
+- Retention: 5 letzte Snapshots pro Site
+- Manueller Restore: `sudo bash restore-wp.sh` → SQL-/Tar-Datei aus diesem Verzeichnis wählen
 
 ---
 
