@@ -229,15 +229,17 @@ Webhook-Format: **Uptime Kuma Push Monitor** (`GET ?status=up|down&msg=…`).
 
 ### WordPress-Dateien (Web-VM)
 - Täglich 02:00: `wp-content/` als `.tar.gz` nach `/var/backups/wp-files/`
-- 7 Tage lokale Aufbewahrung
-- Optional: Remote-Upload via rclone (Cloudflare R2, S3, SFTP)
-- Optional: **age-Verschlüsselung** vor Remote-Upload (`.tar.gz.age`)
+- **7 Tage Aufbewahrung — lokal UND remote** (rclone sync = Mirror, Remote spiegelt Lokal)
+- Remote-Backup ist **Pflicht** (Cloudflare R2, S3 oder SFTP — Setup fragt ab)
+- Bandbreiten-Limit: 8 MB/s tagsüber (08–22), unbegrenzt nachts
+- Optional: **age-Verschlüsselung** vor Upload (`.tar.gz.age`)
 
 ### Datenbank (DB-VM)
 - Täglich 02:00: **Pro Datenbank** ein eigener komprimierter SQL-Dump nach `/var/backups/mysql/<dbname>_<datum>.sql.gz`
-- 7 Tage lokale Aufbewahrung
-- Optional: Remote-Upload via rclone
-- Optional: **age-Verschlüsselung** vor Remote-Upload (`.sql.gz.age`)
+- **7 Tage Aufbewahrung — lokal UND remote** (rclone sync = Mirror)
+- Remote-Backup ist **Pflicht** (R2/S3/SFTP)
+- Bandbreiten-Limit wie bei Files-Backup
+- Optional: **age-Verschlüsselung** vor Upload (`.sql.gz.age`)
 
 ### Backup-Verifikation
 - Wöchentlich (Sonntag 04:00): `backup-verify.sh` prüft tar-Integrität, age-Entschlüsselbarkeit und SQL-Inhalt

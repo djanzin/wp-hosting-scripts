@@ -76,44 +76,50 @@ read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_UR
 read -rsp "SEOpress Pro Lizenz-Key (leer = überspringen): " SEOPRESS_KEY; echo ""
 
 echo ""
-echo "Remote-Backup für WordPress-Dateien (wp-content) konfigurieren?"
+echo -e "${BOLD}Remote-Backup für WordPress-Dateien (wp-content) — PFLICHT${NC}"
 echo "  1) Cloudflare R2"
 echo "  2) S3-kompatibel (AWS, MinIO, etc.)"
 echo "  3) SFTP"
-echo "  4) Überspringen (nur lokale Backups)"
 echo ""
-read -rp "Auswahl [1-4]: " RCLONE_CHOICE
 
 RCLONE_REMOTE=""
-case "$RCLONE_CHOICE" in
-    1)
-        read -rp "R2 Account-ID: " R2_ACCOUNT_ID
-        read -rp "R2 Access Key ID: " R2_KEY_ID
-        read -rsp "R2 Access Key Secret: " R2_KEY_SECRET; echo ""
-        read -rp "R2 Bucket-Name: " R2_BUCKET
-        RCLONE_REMOTE="r2"
-        RCLONE_DEST="r2:${R2_BUCKET}/wp-files"
-        ;;
-    2)
-        read -rp "S3 Region (z.B. eu-central-1): " S3_REGION
-        read -rp "S3 Bucket-Name: " S3_BUCKET
-        read -rp "S3 Access Key ID: " S3_KEY_ID
-        read -rsp "S3 Access Key Secret: " S3_KEY_SECRET; echo ""
-        read -rp "S3 Endpoint (leer = AWS Standard): " S3_ENDPOINT
-        RCLONE_REMOTE="s3backup"
-        RCLONE_DEST="s3backup:${S3_BUCKET}/wp-files"
-        ;;
-    3)
-        read -rp "SFTP Host: " SFTP_HOST
-        read -rp "SFTP User: " SFTP_USER
-        read -rp "SFTP Pfad (z.B. /backups/wp-files): " SFTP_PATH
-        read -rp "SFTP Port [22]: " SFTP_PORT; SFTP_PORT=${SFTP_PORT:-22}
-        RCLONE_REMOTE="sftpbackup"
-        RCLONE_DEST="sftpbackup:${SFTP_PATH}"
-        ;;
-    4) RCLONE_REMOTE="" ;;
-    *) warn "Ungültige Auswahl — Remote-Backup übersprungen"; RCLONE_REMOTE="" ;;
-esac
+while [[ -z "$RCLONE_REMOTE" ]]; do
+    read -rp "Auswahl [1-3]: " RCLONE_CHOICE
+    case "$RCLONE_CHOICE" in
+        1)
+            read -rp "R2 Account-ID: " R2_ACCOUNT_ID
+            read -rp "R2 Access Key ID: " R2_KEY_ID
+            read -rsp "R2 Access Key Secret: " R2_KEY_SECRET; echo ""
+            read -rp "R2 Bucket-Name: " R2_BUCKET
+            [[ -z "$R2_ACCOUNT_ID" || -z "$R2_KEY_ID" || -z "$R2_KEY_SECRET" || -z "$R2_BUCKET" ]] && \
+                { warn "Alle R2-Felder sind Pflicht — bitte erneut eingeben."; continue; }
+            RCLONE_REMOTE="r2"
+            RCLONE_DEST="r2:${R2_BUCKET}/wp-files"
+            ;;
+        2)
+            read -rp "S3 Region (z.B. eu-central-1): " S3_REGION
+            read -rp "S3 Bucket-Name: " S3_BUCKET
+            read -rp "S3 Access Key ID: " S3_KEY_ID
+            read -rsp "S3 Access Key Secret: " S3_KEY_SECRET; echo ""
+            read -rp "S3 Endpoint (leer = AWS Standard): " S3_ENDPOINT
+            [[ -z "$S3_BUCKET" || -z "$S3_KEY_ID" || -z "$S3_KEY_SECRET" ]] && \
+                { warn "Bucket, Key-ID und Secret sind Pflicht — bitte erneut eingeben."; continue; }
+            RCLONE_REMOTE="s3backup"
+            RCLONE_DEST="s3backup:${S3_BUCKET}/wp-files"
+            ;;
+        3)
+            read -rp "SFTP Host: " SFTP_HOST
+            read -rp "SFTP User: " SFTP_USER
+            read -rp "SFTP Pfad (z.B. /backups/wp-files): " SFTP_PATH
+            read -rp "SFTP Port [22]: " SFTP_PORT; SFTP_PORT=${SFTP_PORT:-22}
+            [[ -z "$SFTP_HOST" || -z "$SFTP_USER" || -z "$SFTP_PATH" ]] && \
+                { warn "Host, User und Pfad sind Pflicht — bitte erneut eingeben."; continue; }
+            RCLONE_REMOTE="sftpbackup"
+            RCLONE_DEST="sftpbackup:${SFTP_PATH}"
+            ;;
+        *) warn "Ungültig — Remote-Backup ist Pflicht. Bitte 1, 2 oder 3 wählen." ;;
+    esac
+done
 
 echo ""
 read -rp "Backups mit age verschlüsseln? [j/N]: " ENABLE_AGE_CHOICE
@@ -900,22 +906,29 @@ for f in "\${SITES_DIR}"/*.txt; do
     fi
 done
 
-# Remote-Sync mit Bandbreiten-Drosselung tagsüber
-# (08:00–22:00: 8 MB/s, sonst unbegrenzt — schont Upload-Leitung wenn Site live ist)
+# Erst lokale Retention durchsetzen (alte Backups löschen)
+# Danach Mirror-Sync nach Remote → Remote spiegelt Local exakt → 7 Tage auch Remote
+find "\$BACKUP_DIR" \( -name "*.tar.gz" -o -name "*.tar.gz.age" \) \
+    -mtime +\${RETENTION_DAYS} -delete 2>/dev/null || true
+
+# Mirror-Sync: rclone löscht auf Remote was lokal nicht mehr da ist
+# → Lokale Retention (find -mtime +7) erzwingt automatisch 7-Tage-Retention auch auf Remote
+# bwlimit: tagsüber (08-22) auf 8 MB/s gedrosselt, nachts unbegrenzt
 if [[ -n "\${RCLONE_DEST:-}" ]] && command -v rclone &>/dev/null; then
     if rclone sync "\$BACKUP_DIR" "\$RCLONE_DEST" \
-        --include "*_\${DATE}.tar.gz" --include "*_\${DATE}.tar.gz.age" \
-        --bwlimit "08:00,8M 22:00,off" 2>/dev/null; then
-        echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Sync OK → \${RCLONE_DEST}" >> "\$LOG"
+        --bwlimit "08:00,8M 22:00,off" \
+        --transfers 4 --checkers 8 \
+        2>>"\$LOG"; then
+        REMOTE_COUNT=\$(rclone size "\$RCLONE_DEST" --json 2>/dev/null | grep -oE '"count":[0-9]+' | cut -d: -f2 || echo "?")
+        echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Sync OK → \${RCLONE_DEST} (\${REMOTE_COUNT} Dateien)" >> "\$LOG"
     else
         echo "[\$(date '+%Y-%m-%d %H:%M')] Remote-Sync FEHLER" >> "\$LOG"
         ERRORS=\$((ERRORS + 1))
     fi
+else
+    echo "[\$(date '+%Y-%m-%d %H:%M')] WARNUNG: Remote-Sync übersprungen (RCLONE_DEST nicht konfiguriert)" >> "\$LOG"
+    ERRORS=\$((ERRORS + 1))
 fi
-
-# Alte lokale Backups löschen (sowohl .tar.gz als auch .tar.gz.age)
-find "\$BACKUP_DIR" \( -name "*.tar.gz" -o -name "*.tar.gz.age" \) \
-    -mtime +\${RETENTION_DAYS} -delete 2>/dev/null || true
 
 echo "[\$(date '+%Y-%m-%d %H:%M')] Datei-Backup abgeschlossen (Fehler: \${ERRORS})" >> "\$LOG"
 
