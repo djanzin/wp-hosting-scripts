@@ -111,9 +111,10 @@ case "$method_choice" in
         # DB exportieren und importieren
         info "Datenbank wird exportiert und importiert..."
         TMP_SQL="/tmp/migrate-${DOMAIN_SAFE}-$(date +%s).sql.gz"
+        # MYSQL_PWD via env (statt -p auf Kommandozeile) — nicht in `ps` sichtbar
         ssh -o StrictHostKeyChecking=no "$SRC_SSH" \
-            "mysqldump -h ${SRC_DB_HOST} -u ${SRC_DB_USER} -p${SRC_DB_PASS} \
-            --single-transaction --quick ${SRC_DB_NAME} | gzip" > "$TMP_SQL"
+            "MYSQL_PWD='${SRC_DB_PASS}' mysqldump -h '${SRC_DB_HOST}' -u '${SRC_DB_USER}' \
+            --single-transaction --quick '${SRC_DB_NAME}' | gzip" > "$TMP_SQL"
 
         # Neue DB anlegen
         mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" <<SQL

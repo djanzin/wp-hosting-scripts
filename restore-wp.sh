@@ -219,9 +219,14 @@ if $RESTORE_DB && [[ -n "$SQL_FILE" ]]; then
         --skip-column-names 2>/dev/null || echo "")
 
     if [[ -n "$TABLES" ]]; then
-        mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME" \
-            -e "SET FOREIGN_KEY_CHECKS=0; $(echo "$TABLES" | awk '{print "DROP TABLE IF EXISTS \`"$1"\`;"}') SET FOREIGN_KEY_CHECKS=1;" \
-            2>/dev/null || true
+        # Drop-Statements robust per stdin pipen (vermeidet awk/bash Backtick-Eskapierung)
+        {
+            echo "SET FOREIGN_KEY_CHECKS=0;"
+            while IFS= read -r tbl; do
+                [[ -n "$tbl" ]] && printf 'DROP TABLE IF EXISTS `%s`;\n' "$tbl"
+            done <<< "$TABLES"
+            echo "SET FOREIGN_KEY_CHECKS=1;"
+        } | mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME" 2>/dev/null || true
     fi
 
     # Import — age-verschlüsselt? → entschlüsseln

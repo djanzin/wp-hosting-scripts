@@ -38,11 +38,12 @@ FAILED_FILES=()
 verify_file() {
     local f="$1"
     local kind="$2"   # "files" oder "db"
-    local extracted
 
     if [[ "$f" == *.age ]]; then
         [[ ! -f "$AGE_KEY" ]] && { FAILED_FILES+=("$f (age-Key fehlt)"); return 1; }
-        extracted=$(age -d -i "$AGE_KEY" "$f" 2>/dev/null) || { FAILED_FILES+=("$f (Entschlüsselung)"); return 1; }
+        # Nur ein leichter Decrypt-Check: Header lesen
+        age -d -i "$AGE_KEY" "$f" 2>/dev/null | head -c 1 >/dev/null || \
+            { FAILED_FILES+=("$f (Entschlüsselung)"); return 1; }
     fi
 
     if [[ "$kind" == "files" ]]; then

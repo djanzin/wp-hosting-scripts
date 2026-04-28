@@ -43,6 +43,7 @@ DST_DOMAIN=$(echo "$DST_DOMAIN" | tr '[:upper:]' '[:lower:]' | sed 's/^www\.//')
 
 # Quell-Daten lesen
 SRC_PATH="/var/www/${SRC_DOMAIN}"
+SRC_SAFE=$(echo "$SRC_DOMAIN" | tr '.' '_' | tr '-' '_')
 SRC_DB_NAME=$(grep "^DB-Name:" "${SITES_DIR}/${SRC_DOMAIN}.txt" | awk '{print $2}')
 SRC_TYPE=$(grep "^Typ:" "${SITES_DIR}/${SRC_DOMAIN}.txt" | awk '{print $2}')
 [[ ! -d "$SRC_PATH" ]] && err "Quell-Verzeichnis nicht gefunden: ${SRC_PATH}"
