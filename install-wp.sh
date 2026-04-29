@@ -692,6 +692,26 @@ sudo -u "$SYSTEM_USER" wp option update large_size_h     "0"    --path="$SITE_PA
 
 log "Einstellungen gesetzt (Timezone: Europe/Berlin, Sprache: English, Permalinks: /%category%/%postname%/)"
 
+# ── Theme: Blocksy + Child ────────────────────────────────────────────────
+# Blocksy als Standard-Theme (FSE-fähig, performant). Child wird aktiviert,
+# damit Anpassungen Updates des Parent-Themes überleben.
+THEMES_DIR="/etc/wp-hosting/themes"
+if [[ -f "${THEMES_DIR}/blocksy.zip" ]]; then
+    sudo -u "$SYSTEM_USER" wp theme install "${THEMES_DIR}/blocksy.zip" \
+        --path="$SITE_PATH" --allow-root 2>/dev/null || true
+
+    if [[ -f "${THEMES_DIR}/blocksy-child.zip" ]]; then
+        sudo -u "$SYSTEM_USER" wp theme install "${THEMES_DIR}/blocksy-child.zip" --activate \
+            --path="$SITE_PATH" --allow-root
+        log "Blocksy + Child Theme installiert (Child aktiv → Anpassungen update-sicher)"
+    else
+        sudo -u "$SYSTEM_USER" wp theme activate blocksy --path="$SITE_PATH" --allow-root
+        log "Blocksy Theme installiert und aktiviert"
+    fi
+else
+    warn "Blocksy nicht gefunden (${THEMES_DIR}/blocksy.zip) — sync-assets.sh ausführen"
+fi
+
 # ── Redis Object Cache ─────────────────────────────────────────────────────
 sudo -u "$SYSTEM_USER" wp plugin install redis-cache --activate --path="$SITE_PATH" --allow-root
 sudo -u "$SYSTEM_USER" wp redis enable --path="$SITE_PATH" --allow-root 2>/dev/null || true
@@ -757,12 +777,47 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     log "WooCommerce installiert"
 fi
 
+# ── Blocksy Companion Pro (Theme-Erweiterung) ─────────────────────────────
+PLUGINS_DIR="/etc/wp-hosting/plugins"
+if [[ -f "${PLUGINS_DIR}/blocksy-companion-pro.zip" ]]; then
+    sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/blocksy-companion-pro.zip" \
+        --activate --path="$SITE_PATH" --allow-root
+    log "Blocksy Companion Pro installiert (Theme-Builder, Header/Footer, Custom Post Types)"
+fi
+
+# ── Site-Type-spezifische Pro-Plugins ─────────────────────────────────────
+if [[ "$SITE_TYPE" == "wordpress" ]]; then
+    # PostX Pro — Tech-Blog-Blocks (Reviews, Comparison-Tables, Query Loops)
+    if [[ -f "${PLUGINS_DIR}/postxpro.zip" ]]; then
+        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/postxpro.zip" \
+            --activate --path="$SITE_PATH" --allow-root
+        log "PostX Pro installiert (Review-/Comparison-Blocks für Tech-Blogs)"
+    fi
+fi
+
+if [[ "$SITE_TYPE" == "woocommerce" ]]; then
+    # WowStore Pro — Shop-Erweiterung (Quick-View, Filter, Wishlist, Produktgalerien)
+    if [[ -f "${PLUGINS_DIR}/wowstore-pro.zip" ]]; then
+        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/wowstore-pro.zip" \
+            --activate --path="$SITE_PATH" --allow-root
+        log "WowStore Pro installiert (Shop-Erweiterungen)"
+    fi
+
+    # WowRevenue Pro — Funnels (One-Click Upsells, Order Bumps, Cross-Sells)
+    if [[ -f "${PLUGINS_DIR}/wowrevenue-pro.zip" ]]; then
+        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/wowrevenue-pro.zip" \
+            --activate --path="$SITE_PATH" --allow-root
+        log "WowRevenue Pro installiert (Upsell-/Cross-Sell-Funnels)"
+    fi
+fi
+
 # ── Bloat entfernen ───────────────────────────────────────────────────────
 # Überflüssige Plugins
 sudo -u "$SYSTEM_USER" wp plugin delete hello akismet \
     --path="$SITE_PATH" --allow-root 2>/dev/null || true
 
-# Alte Default-Themes (twentytwentyfive bleibt als Fallback)
+# Default-Themes löschen — Blocksy ist aktiv, twentytwentyfive bleibt als Notfall-Fallback
+# (wp theme delete weigert sich aktive Themes oder Parents aktiver Themes zu löschen)
 for theme in twentytwentyone twentytwentytwo twentytwentythree twentytwentyfour; do
     sudo -u "$SYSTEM_USER" wp theme delete "$theme" \
         --path="$SITE_PATH" --allow-root 2>/dev/null || true

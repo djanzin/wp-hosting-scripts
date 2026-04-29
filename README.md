@@ -245,31 +245,56 @@ Webhook-Format: **Uptime Kuma Push Monitor** (`GET ?status=up|down&msg=…`).
 - Optional: **age-Verschlüsselung** vor Upload (`.sql.gz.age`)
 
 ### Bucket-Layout
-Empfohlen: **2 Buckets** in derselben R2/S3-Storage:
+Empfohlen: **3 Buckets** in derselben R2/S3-Storage:
 
 ```
-r2:wp-backups/                          ← Backup-Bucket
-├── wp-files-<web-vm-1-hostname>/       ← WordPress-VM Backups
-├── wp-files-<web-vm-2-hostname>/       ← WooCommerce-VM Backups
-└── mysql-backups-<db-vm-hostname>/     ← DB-VM Backups
+r2:wp-backups/                          ← Backup-Bucket (7-Tage-Mirror)
+├── wp-files-<web-vm-1-hostname>/
+├── wp-files-<web-vm-2-hostname>/
+└── mysql-backups-<db-vm-hostname>/
 
-r2:wp-plugins/                          ← Plugin-Bucket (private Pro-Plugins)
+r2:wp-plugins/                          ← private/Pro-Plugin-ZIPs
+├── blocksy-companion-pro.zip
+├── postxpro.zip                        ← Tech-Blog-Blocks
 ├── seopress-pro.zip
-└── <weitere>.zip
+├── wowrevenue-pro.zip                  ← Funnels (Woo)
+└── wowstore-pro.zip                    ← Shop-Erweiterungen (Woo)
+
+r2:wp-themes/                           ← private/Pro-Theme-ZIPs
+├── blocksy.zip                         ← Parent-Theme
+└── blocksy-child.zip                   ← Child-Theme (für Anpassungen)
 ```
 
-**Warum 2 Buckets:** Backups haben kurze Retention (7 Tage Mirror), Plugin-ZIPs
+**Warum 3 Buckets:** Backups haben kurze Retention (7-Tage-Mirror), Plugin/Theme-ZIPs
 haben dauerhafte Aufbewahrung. Trennung erleichtert Lifecycle-Rules und
-verhindert versehentliches Löschen von Plugins durch Backup-Sync.
+verhindert versehentliches Löschen durch Backup-Sync.
 
-Bei der Setup-Abfrage gibst du beide Bucket-Namen einmal ein. Plugin-ZIPs
-werden beim Setup automatisch nach `/etc/wp-hosting/plugins/` heruntergeladen.
+Bei der Setup-Abfrage gibst du alle drei Bucket-Namen einmal ein. ZIPs werden
+beim Setup automatisch heruntergeladen:
+- Plugins → `/etc/wp-hosting/plugins/`
+- Themes → `/etc/wp-hosting/themes/`
 
-**Plugin-Updates:** Nach Upload einer neuen ZIP-Version in den Plugin-Bucket:
+**Welche Plugins/Themes werden pro Site-Typ aktiviert:**
+
+| Plugin/Theme | Blog (wordpress) | Shop (woocommerce) |
+|---|:---:|:---:|
+| Blocksy + Child Theme | ✓ | ✓ |
+| Blocksy Companion Pro | ✓ | ✓ |
+| SEOpress Pro | ✓ | ✓ |
+| Redis, FluentSMTP, WebP, 2FA, Antispam Bee, Turnstile, Nginx Helper, FAZ Cookie Manager | ✓ | ✓ |
+| **PostX Pro** (Reviews, Comparison, Query Loops) | ✓ | — |
+| **WowStore Pro** (Shop-Erweiterung) | — | ✓ |
+| **WowRevenue Pro** (Upsell-Funnels) | — | ✓ |
+| WooCommerce | — | ✓ |
+
+**Plugin-/Theme-Updates:** Nach Upload einer neuen ZIP-Version in den jeweiligen Bucket:
 ```bash
-sudo bash sync-plugins.sh           # alle Plugins neu laden (Mirror)
-sudo bash sync-plugins.sh --list    # zeigt lokal + remote
+sudo bash sync-plugins.sh             # Plugins UND Themes synchronisieren
+sudo bash sync-plugins.sh --plugins   # nur Plugins
+sudo bash sync-plugins.sh --themes    # nur Themes
+sudo bash sync-plugins.sh --list      # Inventar (lokal + remote)
 ```
+Bestehende Sites müssen danach manuell mit `wp plugin install ... --force` aktualisiert werden.
 
 ### Backup-Verifikation
 - Wöchentlich (Sonntag 04:00): `backup-verify.sh` prüft tar-Integrität, age-Entschlüsselbarkeit und SQL-Inhalt

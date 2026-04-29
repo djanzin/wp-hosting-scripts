@@ -126,11 +126,17 @@ done
 
 info "Remote-Backup-Pfad: ${BOLD}${RCLONE_DEST}${NC}"
 
-# Optional: Bucket für private/Pro-Plugin-ZIPs (SEOpress Pro etc.)
+# Optional: Bucket für private/Pro-Plugin-ZIPs (SEOpress Pro, PostX Pro, WowRevenue etc.)
 echo ""
 read -rp "Bucket-Name für Plugin-ZIPs (z.B. wp-plugins, leer = überspringen): " PLUGIN_BUCKET
 if [[ -n "$PLUGIN_BUCKET" ]]; then
     info "Plugin-Bucket: ${BOLD}${RCLONE_REMOTE}:${PLUGIN_BUCKET}${NC}"
+fi
+
+# Optional: Bucket für private/Pro-Theme-ZIPs (Blocksy + Child etc.)
+read -rp "Bucket-Name für Theme-ZIPs (z.B. wp-themes, leer = überspringen): " THEME_BUCKET
+if [[ -n "$THEME_BUCKET" ]]; then
+    info "Theme-Bucket:  ${BOLD}${RCLONE_REMOTE}:${THEME_BUCKET}${NC}"
 fi
 
 echo ""
@@ -209,7 +215,7 @@ EOF
     chmod 600 /root/.config/rclone/rclone.conf
     log "rclone konfiguriert (Remote: ${RCLONE_REMOTE} → ${RCLONE_DEST})"
 
-    # Plugin-ZIPs vom Plugin-Bucket laden (SEOpress Pro, andere private Plugins)
+    # Plugin-ZIPs vom Plugin-Bucket laden
     if [[ -n "$PLUGIN_BUCKET" ]]; then
         mkdir -p /etc/wp-hosting/plugins
         info "Lade Plugin-ZIPs aus ${RCLONE_REMOTE}:${PLUGIN_BUCKET}..."
@@ -219,6 +225,19 @@ EOF
             log "  ${FOUND} Plugin-ZIP(s) geladen → /etc/wp-hosting/plugins/"
         else
             warn "  Plugin-Bucket leer oder nicht erreichbar — manuell befüllen"
+        fi
+    fi
+
+    # Theme-ZIPs vom Theme-Bucket laden (Blocksy + Child)
+    if [[ -n "$THEME_BUCKET" ]]; then
+        mkdir -p /etc/wp-hosting/themes
+        info "Lade Theme-ZIPs aus ${RCLONE_REMOTE}:${THEME_BUCKET}..."
+        if rclone copy "${RCLONE_REMOTE}:${THEME_BUCKET}/" /etc/wp-hosting/themes/ \
+            --include "*.zip" 2>/dev/null; then
+            FOUND=$(ls /etc/wp-hosting/themes/*.zip 2>/dev/null | wc -l)
+            log "  ${FOUND} Theme-ZIP(s) geladen → /etc/wp-hosting/themes/"
+        else
+            warn "  Theme-Bucket leer oder nicht erreichbar — manuell befüllen"
         fi
     fi
 fi
@@ -1168,6 +1187,7 @@ WEBHOOK_URL=${WEBHOOK_URL:-}
 RCLONE_REMOTE=${RCLONE_REMOTE:-}
 RCLONE_DEST=${RCLONE_DEST:-}
 PLUGIN_BUCKET=${PLUGIN_BUCKET:-}
+THEME_BUCKET=${THEME_BUCKET:-}
 SEOPRESS_KEY=${SEOPRESS_KEY:-}
 PMA_AUTH_PASS=${PMA_AUTH_PASS}
 EOF
