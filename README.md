@@ -181,6 +181,7 @@ sudo bash maintenance.sh
 | Two Factor | 2FA für WP-Admin |
 | SEOpress + SEOpress Pro | SEO (Pro-ZIP + Lizenz-Key aus Config) |
 | FAZ Cookie Manager | DSGVO-konformes Cookie Consent (GitHub) |
+| MainWP Child | Remote-Verwaltung via zentralem MainWP Dashboard (mit auto-generierter Unique Security ID) |
 
 ### Bloat-Entfernung
 - Plugins: `hello`, `akismet` gelöscht
@@ -256,6 +257,8 @@ r2:wp-backups/                          ← Backup-Bucket (7-Tage-Mirror)
 
 r2:wp-plugins/                          ← private/Pro-Plugin-ZIPs
 ├── blocksy-companion-pro.zip
+├── mainwp-child.zip                    ← MainWP Child (auf JEDER Site auto-installiert)
+├── mainwp-dashboard.zip                ← MainWP Dashboard (nur 1× zentral, kein Auto-Install)
 ├── postxpro.zip                        ← Tech-Blog-Blocks
 ├── seopress-pro.zip
 ├── wowrevenue-pro.zip                  ← Funnels (Woo)
@@ -283,6 +286,7 @@ beim Setup automatisch heruntergeladen:
 | Blocksy Companion Pro | ✓ | ✓ |
 | SEOpress Pro | ✓ | ✓ |
 | Redis, FluentSMTP, WebP, 2FA, Antispam Bee, Turnstile, Nginx Helper, FAZ Cookie Manager | ✓ | ✓ |
+| **MainWP Child** (Remote-Verwaltung, mit Unique Security ID) | ✓ | ✓ |
 | **PostX Pro** (Reviews, Comparison, Query Loops) | ✓ | — |
 | **WowStore Pro** (Shop-Erweiterung) | — | ✓ |
 | **WowRevenue Pro** (Upsell-Funnels) | — | ✓ |

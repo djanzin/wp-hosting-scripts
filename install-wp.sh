@@ -811,6 +811,20 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     fi
 fi
 
+# ── MainWP Child (Remote-Verwaltung via zentralem MainWP Dashboard) ───────
+# Standard auf beiden Site-Typen; Security ID schützt vor Hijack durch fremde Dashboards
+MAINWP_SECURITY_ID=""
+if [[ -f "${PLUGINS_DIR}/mainwp-child.zip" ]]; then
+    sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/mainwp-child.zip" \
+        --activate --path="$SITE_PATH" --allow-root
+
+    # 16 Hex-Zeichen als Unique Security ID — wird beim Connect im Dashboard verlangt
+    MAINWP_SECURITY_ID=$(openssl rand -hex 8)
+    sudo -u "$SYSTEM_USER" wp option update mainwp_child_uniqueId "$MAINWP_SECURITY_ID" \
+        --path="$SITE_PATH" --allow-root
+    log "MainWP Child installiert (Security ID: ${MAINWP_SECURITY_ID})"
+fi
+
 # ── Bloat entfernen ───────────────────────────────────────────────────────
 # Überflüssige Plugins
 sudo -u "$SYSTEM_USER" wp plugin delete hello akismet \
@@ -1257,6 +1271,17 @@ Nginx-Vhost:   ${NGINX_VHOST}
 System-User:   ${SYSTEM_USER}
 Admin-IP:      ${ADMIN_IP:-unbeschränkt}
 EOF
+
+# MainWP-Sektion nur anhängen wenn das Plugin installiert wurde
+if [[ -n "$MAINWP_SECURITY_ID" ]]; then
+    cat >> "$CRED_FILE" <<EOF
+
+── MainWP Child ──────────────────────────────
+Security ID:   ${MAINWP_SECURITY_ID}
+Hinweis:       Im MainWP Dashboard "Add Site" → URL + Admin-Login + Security ID eingeben
+EOF
+fi
+
 chmod 600 "$CRED_FILE"
 _INSTALL_DONE=true  # Cleanup-Trap deaktivieren
 
@@ -1286,6 +1311,9 @@ echo ""
 echo -e "${YELLOW}  → Zugangsdaten gespeichert: ${CRED_FILE}${NC}"
 echo -e "${YELLOW}  → Site ist im Maintenance Mode — freischalten: sudo bash maintenance.sh${NC}"
 echo -e "${YELLOW}  → NPM Proxy-Host für https://${DOMAIN} anlegen (→ Port 80).${NC}"
+if [[ -n "$MAINWP_SECURITY_ID" ]]; then
+echo -e "${YELLOW}  → MainWP: Im Dashboard 'Add Site' → URL + Admin-Login + Security ID ${BOLD}${MAINWP_SECURITY_ID}${NC}"
+fi
 if [[ "$SITE_TYPE" == "woocommerce" ]]; then
 echo -e "${YELLOW}  → Rechtliche Texte befüllen (Impressum, Datenschutz, AGB, Widerruf):${NC}"
 echo -e "${YELLOW}     Empfehlung: https://www.it-recht-kanzlei.de (Digital-Paket)${NC}"
