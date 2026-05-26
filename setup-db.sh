@@ -428,6 +428,13 @@ WEBHOOK_URL=${WEBHOOK_URL:-}
 CFGEOF
 chmod 600 /etc/wp-hosting/config
 
+# Config für manuelle Backup-Tools — db-backup.sh teilt sich diesen Remote mit Auto-Cron
+cat > /etc/wp-hosting/db-backup.conf <<DBCFGEOF
+RCLONE_DEST="${RCLONE_DEST}"
+DBCFGEOF
+chmod 600 /etc/wp-hosting/db-backup.conf
+log "Manuelle Backup-Tool-Config: /etc/wp-hosting/db-backup.conf"
+
 # age-Recipient für Backup-Verschlüsselung speichern
 if [[ -n "${AGE_RECIPIENT:-}" ]]; then
     echo "$AGE_RECIPIENT" > /etc/wp-hosting/backup-recipient.txt

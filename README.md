@@ -48,7 +48,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL-Terminierung)
 | `tail-logs.sh` | Web-VM | Live-Logs einer Site (Nginx + PHP, farblich getrennt) | Bei Bedarf |
 | `audit-plugins.sh` | Web-VM | Plugin-/Site-Audit: veraltete/inaktive Plugins, Admin-User, DB-Bloat | Monatlich |
 | `sync-plugins.sh` | Web-VM | Private Plugin-ZIPs (SEOpress Pro etc.) aus Plugin-Bucket nachladen | Bei Plugin-Update |
-| `db-backup.sh` | Datenbank-VM | Manuellen MariaDB-Dump erstellen | Bei Bedarf |
+| `db-backup.sh` | Datenbank-VM | Manueller MariaDB-Dump (Encryption + Remote-Mirror wie Auto-Cron, flock-protected) | Bei Bedarf |
 
 ---
 
@@ -243,6 +243,7 @@ Webhook-Format: **Uptime Kuma Push Monitor** (`GET ?status=up|down&msg=…`).
 - Remote-Backup ist **Pflicht** (R2/S3/SFTP)
 - Bandbreiten-Limit wie bei Files-Backup
 - Optional: **age-Verschlüsselung** vor Upload (`.sql.gz.age`)
+- **Manuelle Backups (`db-backup.sh`)** verwenden denselben Code-Pfad: Encryption + Remote-Mirror identisch zum Auto-Cron, `flock`-Lock auf `/var/lock/mysql-backup.lock` verhindert parallele Läufe
 
 ### Bucket-Layout
 Empfohlen: **3 Buckets** in derselben R2/S3-Storage:
@@ -315,6 +316,7 @@ Bestehende Sites müssen danach manuell mit `wp plugin install ... --force` aktu
 |---|---|
 | `/etc/wp-hosting/config` | VM-Typ, DB-Zugangsdaten, Webhook-URL, SEOpress-Key (Web-VM) |
 | `/etc/wp-hosting/db-credentials.txt` | DB-Admin-Zugangsdaten (DB-VM) |
+| `/etc/wp-hosting/db-backup.conf` | rclone-Remote-Ziel — geteilt von Auto-Cron + `db-backup.sh` (DB-VM) |
 | `/etc/wp-hosting/sites/<domain>.txt` | WP-Admin, DB, Filebrowser, SFTP pro Site |
 | `/etc/wp-hosting/deleted/<domain>.<datum>.txt` | Archivierte Zugangsdaten gelöschter Sites |
 
