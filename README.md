@@ -5,21 +5,22 @@ Vollautomatisiertes WordPress- und WooCommerce-Hosting auf Ubuntu 24.04 LTS mit 
 ## Architektur
 
 ```
-Internet → Cloudflare → Nginx Proxy Manager (SSL-Terminierung)
+Internet → Cloudflare → Nginx Proxy Manager (SSL + Authentik-OIDC für MainWP)
                                 ↓ HTTP intern
-                ┌───────────────┴───────────────┐
-           Web-VM 1                        Web-VM 2
-        (WordPress)                    (WooCommerce)
-        Nginx + FastCGI-Cache          Nginx + FastCGI-Cache
-        PHP 8.3-FPM (pro Site)        PHP 8.3-FPM (pro Site)
-        Redis Object Cache             Redis Object Cache
-        phpMyAdmin :8080               phpMyAdmin :8080
-        Filebrowser :8090              Filebrowser :8090
-        Netdata :19999                 Netdata :19999
-                └───────────────┬───────────────┘
-                           Datenbank-VM
-                             MariaDB
-                          Netdata :19999
+        ┌──────────────────┬──────────────────┬──────────────────┐
+   Web-VM 1            Web-VM 2           MainWP-VM
+ (WordPress)        (WooCommerce)       (Dashboard, Admin-only)
+ Nginx + FastCGI    Nginx + FastCGI     Nginx (kein Cache)
+ PHP 8.3-FPM 256M   PHP 8.3-FPM 512M    PHP 8.3-FPM 1536M
+ Redis 256mb        Redis 512mb         Redis 1024mb
+ phpMyAdmin :8080   phpMyAdmin :8080    phpMyAdmin :8080
+ Filebrowser :8090  Filebrowser :8090   Filebrowser :8090
+ Netdata :19999     Netdata :19999      Netdata :19999
+        └──────────────────┴──────────────────┴──────────────────┘
+                                ↓
+                           Datenbank-VM (gemeinsam)
+                              MariaDB
+                           Netdata :19999
 ```
 
 ---
@@ -81,6 +82,7 @@ bash proxmox-create-vm.sh   # WooCommerce-VM
 | Datenbank | 4 | 8 GB | 50 GB |
 | WordPress | 2 | 4 GB | 30 GB |
 | WooCommerce | 4 | 8 GB | 40 GB |
+| MainWP | 4 | 8 GB | 50 GB |
 
 ---
 
@@ -140,6 +142,92 @@ sudo bash maintenance.sh
 ```
 
 → Domain auswählen → freischalten → Site ist live.
+
+---
+
+## MainWP Dashboard auf eigener VM (optional)
+
+Für die zentrale Verwaltung aller Child-Sites lohnt sich eine eigene
+**MainWP-VM** als 4. Web-VM. Vorteile gegenüber Co-Hosting auf einer
+WordPress-VM:
+- **1536M PHP-Memory** für Sync mit vielen Child-Sites
+- **Reduzierter Plugin-Stack** (keine SEO/Cookie/Antispam-Plugins für eine reine Admin-Site)
+- **Eigene Auth-Schicht** via NPMPlus Forward-Auth zu Authentik (kein public-erreichbares wp-login)
+
+### Setup (kompakte Variante)
+
+```bash
+# 1) Proxmox Host — VM anlegen mit Option 4 (MainWP, 4/8/50)
+bash proxmox-create-vm.sh
+
+# 2) Auf der neuen VM — Web-Stack mit Option 3 (MainWP Dashboard)
+sudo bash setup-web.sh
+
+# 3) Dashboard-Site (genau eine — Single-Site-by-design)
+sudo bash install-wp.sh --domain mainwp.example.com --type mainwp --yes
+```
+
+### Plugin-ZIPs im wp-plugins-Bucket
+
+- `mainwp-dashboard.zip` — wird auf der mainwp-VM auto-installiert
+- `mainwp-child.zip` — auf jeder normalen WP-/Woo-Site auto-installiert (Standard)
+
+Nach Upload neuer ZIP-Versionen: `sudo bash sync-plugins.sh --plugins`
+
+### NPMPlus Proxy-Host mit Authentik Forward-Auth
+
+In NPMPlus für die MainWP-Domain einen Proxy-Host anlegen:
+- Domain: `mainwp.example.com`
+- Forward zu: `http://<MainWP-VM-IP>:80`
+- SSL: Let's Encrypt aktivieren
+- **Advanced → Custom Nginx Configuration** (Snippet aus
+  [Authentik Outpost-Doku](https://goauthentik.io/docs/providers/proxy/server_nginx)):
+
+```nginx
+# Pass auth requests to Authentik Outpost
+location /outpost.goauthentik.io {
+    proxy_pass        http://<authentik-outpost-ip>:9000/outpost.goauthentik.io;
+    proxy_set_header  Host $host;
+    proxy_set_header  X-Original-URL $scheme://$http_host$request_uri;
+    add_header        Set-Cookie $auth_cookie;
+    auth_request_set  $auth_cookie $upstream_http_set_cookie;
+    proxy_pass_request_body off;
+    proxy_set_header  Content-Length "";
+}
+
+# Forward-Auth für alle Requests
+auth_request               /outpost.goauthentik.io/auth/nginx;
+error_page 401            = @goauthentik_proxy_signin;
+auth_request_set $auth_cookie $upstream_http_set_cookie;
+add_header Set-Cookie     $auth_cookie;
+auth_request_set $authentik_username $upstream_http_x_authentik_username;
+proxy_set_header X-authentik-username $authentik_username;
+
+location @goauthentik_proxy_signin {
+    internal;
+    add_header Set-Cookie $auth_cookie;
+    return 302 /outpost.goauthentik.io/start?rd=$scheme://$http_host$request_uri;
+}
+```
+
+In Authentik:
+1. **Proxy-Provider** für die MainWP-Domain anlegen (Forward-Auth Mode)
+2. Einer **Application** zuweisen
+3. Im **Outpost** veröffentlichen
+
+### Was läuft auf der mainwp-VM
+
+Reduzierter Plugin-Stack (5 Plugins, keine Front-End-Plugins):
+
+| Plugin | Zweck |
+|---|---|
+| MainWP Dashboard | Zentrale Verwaltung der Child-Sites |
+| Two Factor | 2FA — zusätzliche Schicht hinter Authentik |
+| Redis Object Cache | Performance |
+| FluentSMTP | E-Mail-Notifications |
+| Nginx Helper | (Purge deaktiviert — kein FastCGI-Cache auf mainwp-Vhost) |
+
+Kein Blocksy, kein WooCommerce, kein MainWP Child auf der Dashboard-Site selbst.
 
 ---
 
@@ -280,17 +368,19 @@ beim Setup automatisch heruntergeladen:
 
 **Welche Plugins/Themes werden pro Site-Typ aktiviert:**
 
-| Plugin/Theme | Blog (wordpress) | Shop (woocommerce) |
-|---|:---:|:---:|
-| Blocksy + Child Theme | ✓ | ✓ |
-| Blocksy Companion Pro | ✓ | ✓ |
-| SEOpress Pro | ✓ | ✓ |
-| Redis, FluentSMTP, WebP, 2FA, Antispam Bee, Turnstile, Nginx Helper, FAZ Cookie Manager | ✓ | ✓ |
-| **MainWP Child** (Remote-Verwaltung, mit Unique Security ID) | ✓ | ✓ |
-| **PostX Pro** (Reviews, Comparison, Query Loops) | ✓ | — |
-| **WowStore Pro** (Shop-Erweiterung) | — | ✓ |
-| **WowRevenue Pro** (Upsell-Funnels) | — | ✓ |
-| WooCommerce | — | ✓ |
+| Plugin/Theme | Blog (wordpress) | Shop (woocommerce) | MainWP-Dashboard (mainwp) |
+|---|:---:|:---:|:---:|
+| Blocksy + Child Theme | ✓ | ✓ | — |
+| Blocksy Companion Pro | ✓ | ✓ | — |
+| SEOpress Pro | ✓ | ✓ | — |
+| Redis Object Cache, FluentSMTP, Two Factor, Nginx Helper | ✓ | ✓ | ✓ |
+| WebP Converter, Antispam Bee, Turnstile, FAZ Cookie Manager | ✓ | ✓ | — |
+| **MainWP Child** (Remote-Verwaltung, Unique Security ID) | ✓ | ✓ | — |
+| **MainWP Dashboard** (zentrale Verwaltung) | — | — | ✓ |
+| **PostX Pro** (Reviews, Comparison, Query Loops) | ✓ | — | — |
+| **WowStore Pro** (Shop-Erweiterung) | — | ✓ | — |
+| **WowRevenue Pro** (Upsell-Funnels) | — | ✓ | — |
+| WooCommerce | — | ✓ | — |
 
 **Plugin-/Theme-Updates:** Nach Upload einer neuen ZIP-Version in den jeweiligen Bucket:
 ```bash

@@ -24,11 +24,13 @@ echo -e "${NC}"
 echo "Welche Art von Web-VM wird eingerichtet?"
 echo "  1) WordPress (Standard)"
 echo "  2) WooCommerce (Performance-optimiert)"
+echo "  3) MainWP Dashboard (Admin-only, viel RAM, kein public Frontend)"
 echo ""
-read -rp "Auswahl [1/2]: " vm_choice
+read -rp "Auswahl [1/2/3]: " vm_choice
 case "$vm_choice" in
     1) VM_TYPE="wordpress" ;;
     2) VM_TYPE="woocommerce" ;;
+    3) VM_TYPE="mainwp" ;;
     *) err "Ungültige Auswahl." ;;
 esac
 
@@ -292,13 +294,21 @@ log "WP-CLI installiert"
 # ── PHP 8.3 konfigurieren ─────────────────────────────────────────────────
 PHP_INI="/etc/php/8.3/fpm/php.ini"
 
-if [[ "$VM_TYPE" == "woocommerce" ]]; then
-    MEM_LIMIT="512M"; UPLOAD_SIZE="128M"; MAX_EXEC="300"
-    MAX_INPUT_VARS="10000"; OPCACHE_MEM="256"; OPCACHE_FILES="20000"
-else
-    MEM_LIMIT="256M"; UPLOAD_SIZE="64M"; MAX_EXEC="60"
-    MAX_INPUT_VARS="5000"; OPCACHE_MEM="128"; OPCACHE_FILES="10000"
-fi
+case "$VM_TYPE" in
+    woocommerce)
+        MEM_LIMIT="512M"; UPLOAD_SIZE="128M"; MAX_EXEC="300"
+        MAX_INPUT_VARS="10000"; OPCACHE_MEM="256"; OPCACHE_FILES="20000"
+        ;;
+    mainwp)
+        # MainWP Dashboard: hoher RAM-Bedarf für viele verwaltete Sites + lange Sync-Operationen
+        MEM_LIMIT="1536M"; UPLOAD_SIZE="128M"; MAX_EXEC="600"
+        MAX_INPUT_VARS="10000"; OPCACHE_MEM="256"; OPCACHE_FILES="20000"
+        ;;
+    *)  # wordpress
+        MEM_LIMIT="256M"; UPLOAD_SIZE="64M"; MAX_EXEC="60"
+        MAX_INPUT_VARS="5000"; OPCACHE_MEM="128"; OPCACHE_FILES="10000"
+        ;;
+esac
 
 sed -i "s/memory_limit = .*/memory_limit = ${MEM_LIMIT}/" "$PHP_INI"
 sed -i "s/upload_max_filesize = .*/upload_max_filesize = ${UPLOAD_SIZE}/" "$PHP_INI"
@@ -325,7 +335,11 @@ EOF
 log "PHP 8.3 konfiguriert (${MEM_LIMIT} RAM, OPcache ${OPCACHE_MEM}MB)"
 
 # ── Redis konfigurieren ───────────────────────────────────────────────────
-REDIS_MEM=$( [[ "$VM_TYPE" == "woocommerce" ]] && echo "512mb" || echo "256mb" )
+case "$VM_TYPE" in
+    woocommerce) REDIS_MEM="512mb" ;;
+    mainwp)      REDIS_MEM="1024mb" ;;
+    *)           REDIS_MEM="256mb" ;;
+esac
 
 sed -i "s/^# maxmemory .*/maxmemory ${REDIS_MEM}/" /etc/redis/redis.conf
 sed -i "s/^maxmemory .*/maxmemory ${REDIS_MEM}/" /etc/redis/redis.conf

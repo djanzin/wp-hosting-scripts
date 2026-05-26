@@ -80,20 +80,34 @@ if [[ -n "$CLI_TYPE" ]]; then
     case "$CLI_TYPE" in
         wp|wordpress)         SITE_TYPE="wordpress" ;;
         woo|woocommerce|wc)   SITE_TYPE="woocommerce" ;;
-        *) err "Ungültiger --type: ${CLI_TYPE} (erlaubt: wordpress, woocommerce)" ;;
+        mainwp|main|mwp)      SITE_TYPE="mainwp" ;;
+        *) err "Ungültiger --type: ${CLI_TYPE} (erlaubt: wordpress, woocommerce, mainwp)" ;;
     esac
 else
     echo ""
     echo "Welche Installation?"
     echo "  1) WordPress"
     echo "  2) WooCommerce"
+    echo "  3) MainWP Dashboard"
     echo ""
-    read -rp "Auswahl [1/2]: " site_choice
+    read -rp "Auswahl [1/2/3]: " site_choice
     case "$site_choice" in
         1) SITE_TYPE="wordpress" ;;
         2) SITE_TYPE="woocommerce" ;;
+        3) SITE_TYPE="mainwp" ;;
         *) err "Ungültige Auswahl." ;;
     esac
+fi
+
+# ── Sanity Check für MainWP-Type ──────────────────────────────────────────
+if [[ "$SITE_TYPE" == "mainwp" ]]; then
+    if [[ "${VM_TYPE:-}" != "mainwp" ]]; then
+        err "Diese VM ist nicht als MainWP-VM eingerichtet (VM_TYPE=${VM_TYPE:-unbekannt}). Erst setup-web.sh mit Option 3 (MainWP Dashboard) ausführen."
+    fi
+    EXISTING_SITES=$(ls -1 /etc/wp-hosting/sites/*.txt 2>/dev/null | wc -l)
+    if [[ ${EXISTING_SITES} -gt 0 ]]; then
+        err "MainWP-VM ist Single-Site-by-design — es existiert bereits eine Site."
+    fi
 fi
 
 if [[ -n "$CLI_ADMIN_IP" ]]; then
@@ -286,7 +300,42 @@ log "Verzeichnis: ${SITE_PATH}"
 TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
 TOTAL_RAM_MB=$((TOTAL_RAM_KB / 1024))
 
-if [[ "$SITE_TYPE" == "woocommerce" ]]; then
+if [[ "$SITE_TYPE" == "mainwp" ]]; then
+    # MainWP Dashboard: ondemand — Admin-Last ist bursty, keine permanenten Worker
+    MAX_CHILDREN=10
+    cat > "$PHP_POOL" <<EOF
+[${DOMAIN}]
+user  = ${SYSTEM_USER}
+group = www-data
+
+listen = /run/php/php8.3-fpm-${DOMAIN}.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode  = 0660
+
+; ondemand: keine Worker im Idle — Admin-Site ohne dauerhaften Traffic
+pm                      = ondemand
+pm.max_children         = ${MAX_CHILDREN}
+pm.process_idle_timeout = 30s
+pm.max_requests         = 500
+
+pm.status_path          = /fpm-status
+ping.path               = /fpm-ping
+ping.response           = pong
+
+php_admin_value[memory_limit]         = 1536M
+php_admin_value[upload_max_filesize]  = 128M
+php_admin_value[post_max_size]        = 128M
+php_admin_value[max_execution_time]   = 600
+php_admin_value[max_input_time]       = 600
+php_admin_value[max_input_vars]       = 10000
+php_admin_value[error_log]            = /var/log/php/${DOMAIN}.error.log
+php_admin_flag[log_errors]            = on
+
+slowlog                               = /var/log/php/${DOMAIN}.slow.log
+request_slowlog_timeout               = 10s
+EOF
+elif [[ "$SITE_TYPE" == "woocommerce" ]]; then
     # WooCommerce: static process manager für konstante Performance
     WORKER_MEM=120
     MAX_CHILDREN=$((TOTAL_RAM_MB / 4 / WORKER_MEM))
@@ -453,6 +502,91 @@ server {
     }
 
     # PHP-FPM Pool-Status (Basic-Auth, gleiches Passwort wie phpMyAdmin)
+    location = /fpm-status {
+        auth_basic           "Restricted";
+        auth_basic_user_file /etc/nginx/.pma_htpasswd;
+        fastcgi_pass         unix:${SOCK};
+        fastcgi_param        SCRIPT_FILENAME \$fastcgi_script_name;
+        include              fastcgi_params;
+    }
+    location = /fpm-ping {
+        access_log           off;
+        fastcgi_pass         unix:${SOCK};
+        fastcgi_param        SCRIPT_FILENAME \$fastcgi_script_name;
+        include              fastcgi_params;
+    }
+
+$(if [[ -n "$ADMIN_IP" ]]; then
+cat <<IPEOF
+    location /wp-admin/ {
+        allow ${ADMIN_IP};
+        deny all;
+    }
+    location = /wp-login.php {
+        allow ${ADMIN_IP};
+        deny all;
+        limit_req zone=login burst=3 nodelay;
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:${SOCK};
+        include fastcgi_params;
+    }
+IPEOF
+else
+cat <<NOIPEOF
+    location = /wp-login.php { limit_req zone=login burst=3 nodelay; include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
+NOIPEOF
+fi)
+}
+EOF
+elif [[ "$SITE_TYPE" == "mainwp" ]]; then
+    # MainWP Dashboard: Admin-only — kein FastCGI-Cache, lange Timeouts für Child-Sync
+    cat > "$NGINX_VHOST" <<EOF
+server {
+    listen 80;
+    server_name ${DOMAIN};
+    root ${SITE_PATH};
+    index index.php;
+
+    access_log /var/log/nginx/${DOMAIN}.access.log main;
+    error_log  /var/log/nginx/${DOMAIN}.error.log warn;
+
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-XSS-Protection "1; mode=block";
+
+    # Großzügige Limits für MainWP-Sync mit vielen Child-Sites
+    client_max_body_size 128M;
+    fastcgi_read_timeout 600s;
+    fastcgi_send_timeout 600s;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$args;
+    }
+
+    location ~ \.php\$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:${SOCK};
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
+        fastcgi_read_timeout 600s;
+    }
+
+    location ~ /\.(ht|git|env)            { deny all; }
+    location ~ /(wp-config\.php|readme\.html|license\.txt|wp-config-sample\.php)\$ { deny all; }
+    location ~* /(?:uploads|files)/.*\.php\$ { deny all; }
+    location = /xmlrpc.php                 { deny all; }
+
+    # OPcache-Status (Basic-Auth)
+    location = /opcache-status {
+        auth_basic           "Restricted";
+        auth_basic_user_file /etc/nginx/.pma_htpasswd;
+        include              snippets/fastcgi-php.conf;
+        fastcgi_pass         unix:${SOCK};
+        fastcgi_param        SCRIPT_FILENAME /var/lib/wp-hosting/opcache-status.php;
+        include              fastcgi_params;
+    }
+
+    # FPM-Pool-Status
     location = /fpm-status {
         auth_basic           "Restricted";
         auth_basic_user_file /etc/nginx/.pma_htpasswd;
@@ -692,6 +826,44 @@ sudo -u "$SYSTEM_USER" wp option update large_size_h     "0"    --path="$SITE_PA
 
 log "Einstellungen gesetzt (Timezone: Europe/Berlin, Sprache: English, Permalinks: /%category%/%postname%/)"
 
+if [[ "$SITE_TYPE" == "mainwp" ]]; then
+    # ══════════════════════════════════════════════════════════════════════════
+    # MainWP Dashboard — reduzierter Plugin-Stack, kein Front-End-Theme
+    # ══════════════════════════════════════════════════════════════════════════
+    PLUGINS_DIR="/etc/wp-hosting/plugins"
+
+    # Redis Object Cache
+    sudo -u "$SYSTEM_USER" wp plugin install redis-cache --activate --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp redis enable --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    log "Redis Object Cache aktiviert"
+
+    # FluentSMTP — für MainWP-Notifications
+    sudo -u "$SYSTEM_USER" wp plugin install fluent-smtp --activate --path="$SITE_PATH" --allow-root
+    log "FluentSMTP installiert"
+
+    # Two Factor — zusätzlich zur Authentik-Schicht
+    sudo -u "$SYSTEM_USER" wp plugin install two-factor --activate --path="$SITE_PATH" --allow-root
+    log "Two Factor installiert (→ Profil → Two Factor Options → QR-Code scannen)"
+
+    # Nginx Helper — Purge deaktiviert (kein FastCGI-Cache auf mainwp-Vhost)
+    sudo -u "$SYSTEM_USER" wp plugin install nginx-helper --activate --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp option update rt_wp_nginx_helper_options \
+        '{"enable_purge":"0"}' \
+        --format=json --path="$SITE_PATH" --allow-root 2>/dev/null || true
+    log "Nginx Helper installiert (Purge deaktiviert — kein FastCGI-Cache)"
+
+    # MainWP Dashboard Plugin aus wp-plugins-Bucket
+    if [[ -f "${PLUGINS_DIR}/mainwp-dashboard.zip" ]]; then
+        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/mainwp-dashboard.zip" \
+            --activate --path="$SITE_PATH" --allow-root
+        log "MainWP Dashboard installiert"
+    else
+        warn "MainWP Dashboard ZIP fehlt: ${PLUGINS_DIR}/mainwp-dashboard.zip — sync-plugins.sh ausführen"
+    fi
+
+    # Dashboard verwaltet sich nicht selbst als Child — MAINWP_SECURITY_ID bleibt leer
+    MAINWP_SECURITY_ID=""
+else
 # ── Theme: Blocksy + Child ────────────────────────────────────────────────
 # Blocksy als Standard-Theme (FSE-fähig, performant). Child wird aktiviert,
 # damit Anpassungen Updates des Parent-Themes überleben.
@@ -824,6 +996,7 @@ if [[ -f "${PLUGINS_DIR}/mainwp-child.zip" ]]; then
         --path="$SITE_PATH" --allow-root
     log "MainWP Child installiert (Security ID: ${MAINWP_SECURITY_ID})"
 fi
+fi  # ── Ende: Standard-Stack (wordpress/woocommerce) vs. mainwp-Branch ──
 
 # ── Bloat entfernen ───────────────────────────────────────────────────────
 # Überflüssige Plugins
@@ -1272,13 +1445,21 @@ System-User:   ${SYSTEM_USER}
 Admin-IP:      ${ADMIN_IP:-unbeschränkt}
 EOF
 
-# MainWP-Sektion nur anhängen wenn das Plugin installiert wurde
+# MainWP-Sektion: Child (Slave-Sites) oder Dashboard (mainwp-VM)
 if [[ -n "$MAINWP_SECURITY_ID" ]]; then
     cat >> "$CRED_FILE" <<EOF
 
 ── MainWP Child ──────────────────────────────
 Security ID:   ${MAINWP_SECURITY_ID}
 Hinweis:       Im MainWP Dashboard "Add Site" → URL + Admin-Login + Security ID eingeben
+EOF
+elif [[ "$SITE_TYPE" == "mainwp" ]]; then
+    cat >> "$CRED_FILE" <<EOF
+
+── MainWP Dashboard ──────────────────────────
+Plugin:        MainWP Dashboard (zentrale Verwaltung)
+Dashboard URL: https://${DOMAIN}/wp-admin/admin.php?page=mainwp_tab
+Auth-Layer:    Authentik Forward-Auth via NPMPlus (siehe README)
 EOF
 fi
 
@@ -1313,6 +1494,9 @@ echo -e "${YELLOW}  → Site ist im Maintenance Mode — freischalten: sudo bash
 echo -e "${YELLOW}  → NPM Proxy-Host für https://${DOMAIN} anlegen (→ Port 80).${NC}"
 if [[ -n "$MAINWP_SECURITY_ID" ]]; then
 echo -e "${YELLOW}  → MainWP: Im Dashboard 'Add Site' → URL + Admin-Login + Security ID ${BOLD}${MAINWP_SECURITY_ID}${NC}"
+elif [[ "$SITE_TYPE" == "mainwp" ]]; then
+echo -e "${YELLOW}  → MainWP Dashboard: ${BOLD}https://${DOMAIN}/wp-admin/admin.php?page=mainwp_tab${NC}"
+echo -e "${YELLOW}     NPM Proxy-Host mit Authentik-Forward-Auth einrichten (Snippet in README).${NC}"
 fi
 if [[ "$SITE_TYPE" == "woocommerce" ]]; then
 echo -e "${YELLOW}  → Rechtliche Texte befüllen (Impressum, Datenschutz, AGB, Widerruf):${NC}"
