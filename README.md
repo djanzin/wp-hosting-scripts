@@ -298,6 +298,9 @@ Kein Blocksy, kein WooCommerce, kein MainWP Child auf der Dashboard-Site selbst.
 - AGB als Terms-Page, Datenschutz als Privacy-Page zugewiesen
 - **E-Mail-Absender**: Shop-Name + `noreply@domain.de` + Footer mit Impressum-Link
 - **Widerrufsrecht-Checkbox** beim Checkout (§ 356 Abs. 5 BGB) — nur bei digitalen Produkten, server-seitig validiert, Zustimmung mit Zeitstempel in Bestellung gespeichert
+- **Button-Lösung** (§ 312j Abs. 3 BGB): Bestell-Button = „Zahlungspflichtig bestellen" (via `digital-checkout.php`, anpassbar)
+- **AGB-Checkbox** am Checkout automatisch (WooCommerce zeigt sie, da AGB als Terms-Page gesetzt)
+- **Kein WooCommerce Germanized** — Rechtskonformität wird nativ + per mu-Plugin gelöst, Rechnungen via WowInvoice. (Grundpreise/PAngV bei Digital-Produkten nicht pflichtig.)
 - **Payment Gateways** automatisch installiert + aktiviert (API-Keys je Shop manuell): Mollie, PayPal Payments, Stripe, Amazon Pay
 - **FunnelKit Automations** (Free-Basis + Pro-ZIP `funnelkit-automations-pro.zip`) für E-Mail-Marketing (Warenkorbabbruch, Broadcasts) — ergänzt WowRevenue (On-Site-Funnels)
 

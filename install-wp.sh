@@ -1282,8 +1282,17 @@ add_action( 'woocommerce_checkout_order_created', function ( $order ) {
         $order->save();
     }
 } );
+
+/**
+ * Button-Lösung (§ 312j Abs. 3 BGB): Bestell-Button muss die Zahlungspflicht
+ * unmissverständlich ausweisen. WooCommerce-Default ("Bestellung aufgeben")
+ * gilt als nicht eindeutig. Ohne Germanized hier zentral gesetzt.
+ */
+add_filter( 'woocommerce_order_button_text', function () {
+    return 'Zahlungspflichtig bestellen';
+} );
 MUPLUGIN
-    log "Must-Use Plugin: Digital Checkout Consent (Widerrufsrecht-Checkbox)"
+    log "Must-Use Plugin: Digital Checkout Consent (Widerruf-Checkbox + Button-Lösung § 312j)"
 fi
 
 # ── Must-Use Plugin: Maintenance Mode ────────────────────────────────────
