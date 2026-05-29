@@ -939,6 +939,17 @@ sudo -u "$SYSTEM_USER" wp option update rt_wp_nginx_helper_options \
     --format=json --path="$SITE_PATH" --allow-root 2>/dev/null || true
 log "Nginx Helper (FastCGI Cache-Invalidierung) aktiviert"
 
+# ── Fluent Forms (Formulare — Free-Basis + Pro-Add-on) ─────────────────────
+# Pro ist ein Add-on und benötigt die Free-Basis aus dem WP-Repo darunter.
+sudo -u "$SYSTEM_USER" wp plugin install fluentform --activate --path="$SITE_PATH" --allow-root
+FLUENTFORM_PRO_ZIP="/etc/wp-hosting/plugins/fluentformpro.zip"
+if [[ -f "$FLUENTFORM_PRO_ZIP" ]]; then
+    sudo -u "$SYSTEM_USER" wp plugin install "$FLUENTFORM_PRO_ZIP" --activate --path="$SITE_PATH" --allow-root
+    log "Fluent Forms + Fluent Forms Pro installiert"
+else
+    log "Fluent Forms (Free) installiert — Pro-ZIP nicht gefunden (→ /etc/wp-hosting/plugins/fluentformpro.zip)"
+fi
+
 # ── WooCommerce ────────────────────────────────────────────────────────────
 if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     info "WooCommerce wird installiert..."
@@ -975,12 +986,39 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
         log "WowStore Pro installiert (Shop-Erweiterungen)"
     fi
 
-    # WowRevenue Pro — Funnels (One-Click Upsells, Order Bumps, Cross-Sells)
+    # WowRevenue Pro — On-Site-Funnels (One-Click Upsells, Order Bumps, Cross-Sells)
     if [[ -f "${PLUGINS_DIR}/wowrevenue-pro.zip" ]]; then
         sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/wowrevenue-pro.zip" \
             --activate --path="$SITE_PATH" --allow-root
-        log "WowRevenue Pro installiert (Upsell-/Cross-Sell-Funnels)"
+        log "WowRevenue Pro installiert (On-Site Upsell-/Cross-Sell-Funnels)"
     fi
+
+    # FunnelKit Automations — E-Mail-Marketing (Warenkorbabbruch, Broadcasts, Sequenzen)
+    # Free-Basis aus WP-Repo + Pro-Add-on aus Bucket (ergänzt WowRevenue, andere Rolle)
+    if sudo -u "$SYSTEM_USER" wp plugin install wp-marketing-automations --activate --path="$SITE_PATH" --allow-root 2>/dev/null; then
+        log "FunnelKit Automations (Free-Basis) installiert"
+    else
+        warn "FunnelKit Automations Free fehlgeschlagen (Slug prüfen: wp-marketing-automations)"
+    fi
+    if [[ -f "${PLUGINS_DIR}/funnelkit-automations-pro.zip" ]]; then
+        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/funnelkit-automations-pro.zip" \
+            --activate --path="$SITE_PATH" --allow-root
+        log "FunnelKit Automations Pro installiert"
+    fi
+
+    # Payment Gateways — nur Plugin-Install + Aktivierung; API-Keys je Shop manuell
+    info "Payment Gateways werden installiert (API-Keys je Shop manuell konfigurieren)..."
+    for PG_SLUG in \
+        mollie-payments-for-woocommerce \
+        woocommerce-paypal-payments \
+        woocommerce-gateway-stripe \
+        woocommerce-gateway-amazon-payments-advanced; do
+        if sudo -u "$SYSTEM_USER" wp plugin install "$PG_SLUG" --activate --path="$SITE_PATH" --allow-root 2>/dev/null; then
+            log "Payment Gateway: ${PG_SLUG}"
+        else
+            warn "Payment Gateway ${PG_SLUG} fehlgeschlagen (Slug prüfen / WP-Repo erreichbar?)"
+        fi
+    done
 fi
 
 # ── MainWP Child (Remote-Verwaltung via zentralem MainWP Dashboard) ───────

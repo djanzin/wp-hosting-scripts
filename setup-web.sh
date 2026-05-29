@@ -1016,6 +1016,14 @@ if [[ -f /usr/local/bin/backup-verify.sh ]] || [[ -f "$(dirname "$0")/backup-ver
     log "Backup-Verifikation eingerichtet (sonntags 04:00, Webhook bei Fehler)"
 fi
 
+# Wöchentliches DB-Cleanup (Sonntag 05:00 — nach Auto-Update + Backup-Verify)
+if [[ -f "$(dirname "$0")/db-cleanup.sh" ]]; then
+    cp "$(dirname "$0")/db-cleanup.sh" /usr/local/bin/db-cleanup.sh
+    chmod +x /usr/local/bin/db-cleanup.sh
+    echo "0 5 * * 0 root /usr/bin/flock -n /var/lock/wp-db-cleanup.lock /usr/local/bin/db-cleanup.sh --quiet --notify" > /etc/cron.d/db-cleanup
+    log "DB-Cleanup eingerichtet (sonntags 05:00 → /var/log/wp-db-cleanup.log)"
+fi
+
 # ── Disk Space Alert Script ───────────────────────────────────────────────
 cat > /usr/local/bin/disk-alert.sh <<'ALERTEOF'
 #!/bin/bash

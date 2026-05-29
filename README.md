@@ -50,6 +50,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL + Authentik-OIDC für MainW
 | `audit-plugins.sh` | Web-VM | Plugin-/Site-Audit: veraltete/inaktive Plugins, Admin-User, DB-Bloat | Monatlich |
 | `sync-plugins.sh` | Web-VM | Private Plugin-ZIPs (SEOpress Pro etc.) aus Plugin-Bucket nachladen | Bei Plugin-Update |
 | `db-backup.sh` | Datenbank-VM | Manueller MariaDB-Dump (Encryption + Remote-Mirror wie Auto-Cron, flock-protected) | Bei Bedarf |
+| `db-cleanup.sh` | Web-VM | DB-Cleanup aller Sites: Transients, Papierkorb, Spam, OPTIMIZE TABLE | Wöchentlich (Cron So 05:00) |
 
 ---
 
@@ -269,7 +270,10 @@ Kein Blocksy, kein WooCommerce, kein MainWP Child auf der Dashboard-Site selbst.
 | Two Factor | 2FA für WP-Admin |
 | SEOpress + SEOpress Pro | SEO (Pro-ZIP + Lizenz-Key aus Config) |
 | FAZ Cookie Manager | DSGVO-konformes Cookie Consent (GitHub) |
+| Fluent Forms + Pro | Formulare (Free-Basis aus Repo + Pro-ZIP `fluentformpro.zip` aus Bucket) |
 | MainWP Child | Remote-Verwaltung via zentralem MainWP Dashboard (mit auto-generierter Unique Security ID) |
+
+> **DB-Cleanup statt WP-Optimize:** Statt eines Plugins läuft `db-cleanup.sh` wöchentlich (So 05:00) per Cron über alle Sites — expired Transients, Papierkorb, Spam-Kommentare, `wp db optimize`. Kein Frontend-Risiko, kein Cache-Konflikt.
 
 ### Bloat-Entfernung
 - Plugins: `hello`, `akismet` gelöscht
@@ -294,8 +298,11 @@ Kein Blocksy, kein WooCommerce, kein MainWP Child auf der Dashboard-Site selbst.
 - AGB als Terms-Page, Datenschutz als Privacy-Page zugewiesen
 - **E-Mail-Absender**: Shop-Name + `noreply@domain.de` + Footer mit Impressum-Link
 - **Widerrufsrecht-Checkbox** beim Checkout (§ 356 Abs. 5 BGB) — nur bei digitalen Produkten, server-seitig validiert, Zustimmung mit Zeitstempel in Bestellung gespeichert
+- **Payment Gateways** automatisch installiert + aktiviert (API-Keys je Shop manuell): Mollie, PayPal Payments, Stripe, Amazon Pay
+- **FunnelKit Automations** (Free-Basis + Pro-ZIP `funnelkit-automations-pro.zip`) für E-Mail-Marketing (Warenkorbabbruch, Broadcasts) — ergänzt WowRevenue (On-Site-Funnels)
 
 > ⚠️ Rechtliche Texte müssen manuell befüllt werden. Empfehlung: [IT-Recht Kanzlei](https://www.it-recht-kanzlei.de) (Digital-Paket).
+> 💳 Payment Gateways werden nur installiert — API-Keys/Modus konfigurierst du pro Shop in WooCommerce → Zahlungen.
 
 ---
 
@@ -345,11 +352,13 @@ r2:wp-backups/                          ← Backup-Bucket (7-Tage-Mirror)
 
 r2:wp-plugins/                          ← private/Pro-Plugin-ZIPs
 ├── blocksy-companion-pro.zip
+├── fluentformpro.zip                   ← Fluent Forms Pro (alle Sites)
+├── funnelkit-automations-pro.zip       ← E-Mail-Marketing (Woo)
 ├── mainwp-child.zip                    ← MainWP Child (auf JEDER Site auto-installiert)
 ├── mainwp-dashboard.zip                ← MainWP Dashboard (nur 1× zentral, kein Auto-Install)
 ├── postxpro.zip                        ← Tech-Blog-Blocks
 ├── seopress-pro.zip
-├── wowrevenue-pro.zip                  ← Funnels (Woo)
+├── wowrevenue-pro.zip                  ← On-Site-Funnels (Woo)
 └── wowstore-pro.zip                    ← Shop-Erweiterungen (Woo)
 
 r2:wp-themes/                           ← private/Pro-Theme-ZIPs
@@ -375,11 +384,14 @@ beim Setup automatisch heruntergeladen:
 | SEOpress Pro | ✓ | ✓ | — |
 | Redis Object Cache, FluentSMTP, Two Factor, Nginx Helper | ✓ | ✓ | ✓ |
 | WebP Converter, Antispam Bee, Turnstile, FAZ Cookie Manager | ✓ | ✓ | — |
+| Fluent Forms + Pro (Formulare) | ✓ | ✓ | — |
 | **MainWP Child** (Remote-Verwaltung, Unique Security ID) | ✓ | ✓ | — |
 | **MainWP Dashboard** (zentrale Verwaltung) | — | — | ✓ |
 | **PostX Pro** (Reviews, Comparison, Query Loops) | ✓ | — | — |
 | **WowStore Pro** (Shop-Erweiterung) | — | ✓ | — |
-| **WowRevenue Pro** (Upsell-Funnels) | — | ✓ | — |
+| **WowRevenue Pro** (On-Site-Funnels) | — | ✓ | — |
+| **FunnelKit Automations** (E-Mail-Marketing) | — | ✓ | — |
+| **Payment Gateways** (Mollie, PayPal, Stripe, Amazon Pay) | — | ✓ | — |
 | WooCommerce | — | ✓ | — |
 
 **Plugin-/Theme-Updates:** Nach Upload einer neuen ZIP-Version in den jeweiligen Bucket:
