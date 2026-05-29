@@ -96,7 +96,15 @@ for CRED_FILE in "${CRED_FILES[@]}"; do
         CTRASH_IDS=$($WP comment list --status=trash --format=ids 2>/dev/null || true)
         [[ -n "$CTRASH_IDS" ]] && $WP comment delete $CTRASH_IDS --force
 
-        # Tabellen optimieren (OPTIMIZE TABLE)
+        # Action Scheduler aufräumen — wächst auf Woo-Shops stark (WooCommerce +
+        # Google/Meta/TikTok/PFM laufen alle darüber). Nur wo der Befehl existiert.
+        # Plain "clean" respektiert die AS-Retention (Default 30 Tage), --batches=0
+        # = alle eligiblen Batches in einem Lauf.
+        if $WP cli has-command 'action-scheduler clean' 2>/dev/null; then
+            $WP action-scheduler clean --batch-size=500 --batches=0
+        fi
+
+        # Tabellen optimieren (OPTIMIZE TABLE) — nach AS-Cleanup, gibt Platz frei
         $WP db optimize
     } >>"$LOG" 2>&1; then
         say "$(log "${DOMAIN} bereinigt")"

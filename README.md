@@ -50,7 +50,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL + Authentik-OIDC für MainW
 | `audit-plugins.sh` | Web-VM | Plugin-/Site-Audit: veraltete/inaktive Plugins, Admin-User, DB-Bloat | Monatlich |
 | `sync-plugins.sh` | Web-VM | Private Plugin-ZIPs (SEOpress Pro etc.) aus Plugin-Bucket nachladen | Bei Plugin-Update |
 | `db-backup.sh` | Datenbank-VM | Manueller MariaDB-Dump (Encryption + Remote-Mirror wie Auto-Cron, flock-protected) | Bei Bedarf |
-| `db-cleanup.sh` | Web-VM | DB-Cleanup aller Sites: Transients, Papierkorb, Spam, OPTIMIZE TABLE | Wöchentlich (Cron So 05:00) |
+| `db-cleanup.sh` | Web-VM | DB-Cleanup aller Sites: Transients, Papierkorb, Spam, Action Scheduler, OPTIMIZE TABLE | Wöchentlich (Cron So 05:00) |
 
 ---
 
@@ -273,7 +273,7 @@ Kein Blocksy, kein WooCommerce, kein MainWP Child auf der Dashboard-Site selbst.
 | Fluent Forms + Pro | Formulare (Free-Basis aus Repo + Pro-ZIP `fluentformpro.zip` aus Bucket) |
 | MainWP Child | Remote-Verwaltung via zentralem MainWP Dashboard (mit auto-generierter Unique Security ID) |
 
-> **DB-Cleanup statt WP-Optimize:** Statt eines Plugins läuft `db-cleanup.sh` wöchentlich (So 05:00) per Cron über alle Sites — expired Transients, Papierkorb, Spam-Kommentare, `wp db optimize`. Kein Frontend-Risiko, kein Cache-Konflikt.
+> **DB-Cleanup statt WP-Optimize:** Statt eines Plugins läuft `db-cleanup.sh` wöchentlich (So 05:00) per Cron über alle Sites — expired Transients, Papierkorb, Spam-Kommentare, Action-Scheduler-Cleanup (nur Woo-Shops), `wp db optimize`. Kein Frontend-Risiko, kein Cache-Konflikt.
 
 ### Bloat-Entfernung
 - Plugins: `hello`, `akismet` gelöscht
