@@ -300,7 +300,8 @@ Kein Blocksy, kein WooCommerce, kein MainWP Child auf der Dashboard-Site selbst.
 - **Widerrufsrecht-Checkbox** beim Checkout (§ 356 Abs. 5 BGB) — nur bei digitalen Produkten, server-seitig validiert, Zustimmung mit Zeitstempel in Bestellung gespeichert
 - **Button-Lösung** (§ 312j Abs. 3 BGB): Bestell-Button = „Zahlungspflichtig bestellen" (via `digital-checkout.php`, anpassbar)
 - **AGB-Checkbox** am Checkout automatisch (WooCommerce zeigt sie, da AGB als Terms-Page gesetzt)
-- **Kein WooCommerce Germanized** — Rechtskonformität wird nativ + per mu-Plugin gelöst, Rechnungen via WowInvoice. (Grundpreise/PAngV bei Digital-Produkten nicht pflichtig.)
+- **Kein WooCommerce Germanized** — Rechtskonformität wird nativ + per mu-Plugin gelöst. (Grundpreise/PAngV bei Digital-Produkten nicht pflichtig.)
+- **Rechnungen via WowInvoice** — auto-installiert aus `wowinvoice-pro.zip` (Premium-only, kein wp.org-Free). PDF-Rechnungen + Packing Slips.
 - **Payment Gateways** automatisch installiert + aktiviert (API-Keys je Shop manuell): Mollie, PayPal Payments, Stripe, Amazon Pay
 - **FunnelKit Automations** (Free-Basis + Pro-ZIP `funnelkit-automations-pro.zip`) für E-Mail-Marketing (Warenkorbabbruch, Broadcasts) — ergänzt WowRevenue (On-Site-Funnels)
 
@@ -361,6 +362,7 @@ r2:wp-plugins/                          ← private/Pro-Plugin-ZIPs
 ├── mainwp-dashboard.zip                ← MainWP Dashboard (nur 1× zentral, kein Auto-Install)
 ├── postxpro.zip                        ← Tech-Blog-Blocks
 ├── seopress-pro.zip
+├── wowinvoice-pro.zip                  ← PDF-Rechnungen (Woo, Premium-only)
 ├── wowrevenue-pro.zip                  ← On-Site-Funnels (Woo)
 └── wowstore-pro.zip                    ← Shop-Erweiterungen (Woo)
 
@@ -393,6 +395,7 @@ beim Setup automatisch heruntergeladen:
 | **PostX Pro** (Reviews, Comparison, Query Loops) | ✓ | — | — |
 | **WowStore Pro** (Shop-Erweiterung) | — | ✓ | — |
 | **WowRevenue Pro** (On-Site-Funnels) | — | ✓ | — |
+| **WowInvoice** (PDF-Rechnungen, Premium-only) | — | ✓ | — |
 | **FunnelKit Automations** (E-Mail-Marketing) | — | ✓ | — |
 | **Payment Gateways** (Mollie, PayPal, Stripe, Amazon Pay) | — | ✓ | — |
 | WooCommerce | — | ✓ | — |
