@@ -304,9 +304,14 @@ Kein Blocksy, kein WooCommerce, kein MainWP Child auf der Dashboard-Site selbst.
 - **Rechnungen via WowInvoice** — auto-installiert aus `wowinvoice-pro.zip` (Premium-only, kein wp.org-Free). PDF-Rechnungen + Packing Slips.
 - **Payment Gateways** automatisch installiert + aktiviert (API-Keys je Shop manuell): Mollie, PayPal Payments, Stripe, Amazon Pay
 - **FunnelKit Automations** (Free-Basis + Pro-ZIP `funnelkit-automations-pro.zip`) für E-Mail-Marketing (Warenkorbabbruch, Broadcasts) — ergänzt WowRevenue (On-Site-Funnels)
+- **Produktfeeds + Marketing-Channels** automatisch installiert + aktiviert:
+  - **Product Feed Manager** (`best-woocommerce-feed`, Free) — CSV/XML-Feeds für Idealo/Preisvergleiche/Affiliate. Free deckt 24h-Schedule, Custom Fields, Varianten als eigene Zeilen ab (Limit 200 Produkte/Feed → Pro-Lizenz manuell auf großen Shops)
+  - **Google for WooCommerce** (`google-listings-and-ads`), **Facebook for WooCommerce** (`facebook-for-woocommerce`), **TikTok** (`tiktok-for-business`) — API-Sync statt CSV für die großen Ad-Plattformen
 
 > ⚠️ Rechtliche Texte müssen manuell befüllt werden. Empfehlung: [IT-Recht Kanzlei](https://www.it-recht-kanzlei.de) (Digital-Paket).
 > 💳 Payment Gateways werden nur installiert — API-Keys/Modus konfigurierst du pro Shop in WooCommerce → Zahlungen.
+> 📡 **Feed-/Channel-Setup je Shop:** Produktfeed (Idealo/Preisvergleich) im PFM-GUI als CSV anlegen → Schedule „daily" → öffentliche URL eintragen. Google/Meta/TikTok: jeweiliges Plugin mit dem Werbekonto verbinden (Merchant Center / Meta Business / TikTok Business). EAN wird aus dem nativen WooCommerce-GTIN-Feld gemappt.
+> 🟣 **TikTok:** Shop-Features enden 2026-06-01, Ads/Katalog laufen weiter. Plugin nur aktiv lassen, wenn du TikTok-Ads fährst.
 
 ---
 
@@ -398,6 +403,8 @@ beim Setup automatisch heruntergeladen:
 | **WowInvoice** (PDF-Rechnungen, Premium-only) | — | ✓ | — |
 | **FunnelKit Automations** (E-Mail-Marketing) | — | ✓ | — |
 | **Payment Gateways** (Mollie, PayPal, Stripe, Amazon Pay) | — | ✓ | — |
+| **Product Feed Manager** (Free, CSV-Feeds Idealo/Preisvergleich) | — | ✓ | — |
+| **Google / Meta / TikTok** for WooCommerce (API-Channels) | — | ✓ | — |
 | WooCommerce | — | ✓ | — |
 
 **Plugin-/Theme-Updates:** Nach Upload einer neuen ZIP-Version in den jeweiligen Bucket:

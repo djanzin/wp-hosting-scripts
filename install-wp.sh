@@ -1029,6 +1029,27 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
             warn "Payment Gateway ${PG_SLUG} fehlgeschlagen (Slug prüfen / WP-Repo erreichbar?)"
         fi
     done
+
+    # ── Produktfeeds & Marketing-Channels ─────────────────────────────────
+    # Product Feed Manager (Free): CSV/XML-Feeds für Idealo/Preisvergleiche/Affiliate.
+    #   Free deckt 24h-Schedule, Custom Fields, Varianten als eigene Zeilen ab.
+    #   200-Produkte/Feed-Limit → Pro-Lizenz ggf. MANUELL auf Shop mit >200 Produkten
+    #   aktivieren (kein Auto-Install, da nur 1-Site-Lizenz).
+    # Google/Meta/TikTok: offizielle API-Plugins (near-realtime Sync statt 24h-CSV).
+    #   Account-Verbindung je Shop manuell in der GUI.
+    #   Hinweis TikTok: Shop-Features enden 2026-06-01, Ads/Katalog laufen weiter.
+    info "Feed- + Channel-Plugins werden installiert (Account-/Feed-Konfig je Shop manuell)..."
+    for FEED_SLUG in \
+        best-woocommerce-feed \
+        google-listings-and-ads \
+        facebook-for-woocommerce \
+        tiktok-for-business; do
+        if sudo -u "$SYSTEM_USER" wp plugin install "$FEED_SLUG" --activate --path="$SITE_PATH" --allow-root 2>/dev/null; then
+            log "Feed/Channel: ${FEED_SLUG}"
+        else
+            warn "Plugin ${FEED_SLUG} fehlgeschlagen (Slug prüfen / WP-Repo erreichbar?)"
+        fi
+    done
 fi
 
 # ── MainWP Child (Remote-Verwaltung via zentralem MainWP Dashboard) ───────
