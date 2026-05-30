@@ -791,85 +791,13 @@ else
     warn "Datenbankverbindung fehlgeschlagen — bitte nach dem Setup prüfen"
 fi
 
-# ── Wöchentlicher Auto-Update Cron ────────────────────────────────────────
-echo ""
-read -rp "Wöchentliche automatische WordPress-Updates aktivieren? (sonntags 03:00) [j/N]: " AUTO_UPDATE
-if [[ "$AUTO_UPDATE" == "j" || "$AUTO_UPDATE" == "J" ]]; then
-    cat > /usr/local/bin/wp-auto-update.sh <<'AUEOF'
-#!/bin/bash
-# Wöchentlicher automatischer WordPress-Update (alle Sites, kein Interaktion)
-source /etc/wp-hosting/config 2>/dev/null || exit 1
-LOG="/var/log/wp-auto-update.log"
-SITES_DIR="/etc/wp-hosting/sites"
-UPDATED=0; FAILED=0
-
-echo "[$(date '+%Y-%m-%d %H:%M')] Auto-Update gestartet" >> "$LOG"
-
-PRE_DIR="/var/backups/wp-pre-update"
-mkdir -p "$PRE_DIR"
-
-for CRED_FILE in "${SITES_DIR}"/*.txt; do
-    DOMAIN=$(basename "$CRED_FILE" .txt)
-    SITE_PATH="/var/www/${DOMAIN}"
-    [[ ! -d "$SITE_PATH" ]] && continue
-
-    WP="wp --path=${SITE_PATH} --allow-root"
-
-    # Pre-Update-Snapshot (Files + DB)
-    PRE_TS=$(date +%Y%m%d_%H%M%S)
-    DB_NAME=$(grep "^DB-Name:" "$CRED_FILE" | awk '{print $2}')
-    DB_USER=$(grep "^DB-User:" "$CRED_FILE" | awk '{print $2}')
-    DB_PASS=$(grep "^DB-Pass:" "$CRED_FILE" | awk '{print $2}')
-    tar -czf "${PRE_DIR}/${DOMAIN}_${PRE_TS}.tar.gz" --exclude="wp-content/cache" \
-        --exclude="wp-content/upgrade" -C "$SITE_PATH" wp-content 2>/dev/null || true
-    [[ -n "$DB_NAME" ]] && MYSQL_PWD="$DB_PASS" mysqldump -h "$DB_HOST" -u "$DB_USER" \
-        --single-transaction --quick "$DB_NAME" 2>/dev/null \
-        | gzip > "${PRE_DIR}/${DOMAIN}_${PRE_TS}.sql.gz" || true
-    # Retention: 5 letzte pro Domain
-    ls -t "${PRE_DIR}/${DOMAIN}_"*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
-    ls -t "${PRE_DIR}/${DOMAIN}_"*.sql.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
-
-    touch "${SITE_PATH}/wp-content/.maintenance-active" 2>/dev/null || true
-    $WP core update            2>>"$LOG" && \
-    $WP plugin update --all    2>>"$LOG" && \
-    $WP theme update --all     2>>"$LOG" && \
-    $WP core update-db         2>>"$LOG" && \
-    $WP transient delete --all 2>/dev/null && \
-    $WP cache flush            2>/dev/null || true
-    EXIT=$?
-    rm -f "${SITE_PATH}/wp-content/.maintenance-active" 2>/dev/null || true
-
-    if [[ $EXIT -eq 0 ]]; then
-        echo "[$(date '+%Y-%m-%d %H:%M')] OK: ${DOMAIN}" >> "$LOG"
-        ((UPDATED++))
-    else
-        echo "[$(date '+%Y-%m-%d %H:%M')] FEHLER: ${DOMAIN}" >> "$LOG"
-        ((FAILED++))
-    fi
-done
-
-# FastCGI Cache leeren
-[[ -d /var/cache/nginx/wp ]] && rm -rf /var/cache/nginx/wp/* 2>/dev/null || true
-
-# WP-CLI selbst aktualisieren
-wp cli update --allow-root --yes 2>>"$LOG" || true
-
-MSG="Auto-Update: ${UPDATED} OK, ${FAILED} Fehler"
-echo "[$(date '+%Y-%m-%d %H:%M')] ${MSG}" >> "$LOG"
-
-# Webhook-Benachrichtigung
-if [[ -n "${WEBHOOK_URL:-}" ]]; then
-    STATUS=$( [[ $FAILED -eq 0 ]] && echo "up" || echo "down" )
-    curl -fsS -G \
-        --data-urlencode "msg=${MSG}" \
-        "${WEBHOOK_URL}?status=${STATUS}" \
-        -o /dev/null 2>/dev/null || true
-fi
-AUEOF
-    chmod +x /usr/local/bin/wp-auto-update.sh
-    echo "0 3 * * 0 root /usr/bin/flock -n /var/lock/wp-auto-update.lock /usr/local/bin/wp-auto-update.sh" > /etc/cron.d/wp-auto-update
-    log "Auto-Update-Cron aktiviert (sonntags 03:00 → /var/log/wp-auto-update.log)"
-fi
+# ── WordPress-Updates: zentral via MainWP (kein Auto-Update-Cron) ────────────────────────────────────────
+# Bewusst KEIN unbeaufsichtigter Auto-Update-Cron. Updates werden kontrolliert
+# über das zentrale MainWP-Dashboard ausgerollt (Update-Vorschau, gestaffelt,
+# Rollback) — verhindert, dass ein fehlerhaftes Update viele Shops gleichzeitig
+# zerlegt. MainWP-„Backup vor Update" zusätzlich aktivieren. Für manuelle
+# CLI-Updates einzelner Sites steht update-wp.sh bereit (inkl. Pre-Update-Snapshots).
+log "WordPress-Updates laufen zentral über MainWP (kein Auto-Update-Cron)"
 
 # ── OPcache-Status PHP-Endpoint ───────────────────────────────────────────
 mkdir -p /var/lib/wp-hosting
@@ -1004,7 +932,7 @@ chmod +x /usr/local/bin/wp-backup-files.sh
 echo "0 2 * * * root /usr/bin/flock -n /var/lock/wp-backup-files.lock /usr/local/bin/wp-backup-files.sh" > /etc/cron.d/wp-backup-files
 log "Datei-Backup eingerichtet (täglich 02:00, flock-protected → ${BACKUP_LOCAL})"
 
-# Wöchentliche Backup-Verifikation (Sonntag 04:00 — nach Auto-Update)
+# Wöchentliche Backup-Verifikation (Sonntag 04:00)
 if [[ -f /usr/local/bin/backup-verify.sh ]] || [[ -f "$(dirname "$0")/backup-verify.sh" ]]; then
     # Script-Pfad ermitteln und installieren
     SRC_VERIFY="$(dirname "$0")/backup-verify.sh"
@@ -1016,7 +944,7 @@ if [[ -f /usr/local/bin/backup-verify.sh ]] || [[ -f "$(dirname "$0")/backup-ver
     log "Backup-Verifikation eingerichtet (sonntags 04:00, Webhook bei Fehler)"
 fi
 
-# Wöchentliches DB-Cleanup (Sonntag 05:00 — nach Auto-Update + Backup-Verify)
+# Wöchentliches DB-Cleanup (Sonntag 05:00 — nach Backup-Verify)
 if [[ -f "$(dirname "$0")/db-cleanup.sh" ]]; then
     cp "$(dirname "$0")/db-cleanup.sh" /usr/local/bin/db-cleanup.sh
     chmod +x /usr/local/bin/db-cleanup.sh
