@@ -1030,26 +1030,38 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
         fi
     done
 
-    # ── Produktfeeds & Marketing-Channels ─────────────────────────────────
-    # Product Feed Manager (Free): CSV/XML-Feeds für Idealo/Preisvergleiche/Affiliate.
+    # ── Produktfeeds (Lean-Architektur: PFM für ALLE Feeds, PMW für alle Pixel) ──
+    # Product Feed Manager (Free): erzeugt JEDEN Katalog/Feed — Google (Content-API-
+    #   Auto-Sync), Meta, TikTok, Pinterest, Bing Shopping, Idealo/Preisvergleiche.
     #   Free deckt 24h-Schedule, Custom Fields, Varianten als eigene Zeilen ab.
-    #   200-Produkte/Feed-Limit → Pro-Lizenz ggf. MANUELL auf Shop mit >200 Produkten
+    #   200-Produkte/Feed-Limit → Pro-Lizenz MANUELL auf Shop mit >200 Produkten
     #   aktivieren (kein Auto-Install, da nur 1-Site-Lizenz).
-    # Google/Meta/TikTok: offizielle API-Plugins (near-realtime Sync statt 24h-CSV).
-    #   Account-Verbindung je Shop manuell in der GUI.
-    #   Hinweis TikTok: Shop-Features enden 2026-06-01, Ads/Katalog laufen weiter.
-    info "Feed- + Channel-Plugins werden installiert (Account-/Feed-Konfig je Shop manuell)..."
-    for FEED_SLUG in \
-        best-woocommerce-feed \
-        google-listings-and-ads \
-        facebook-for-woocommerce \
-        tiktok-for-business; do
-        if sudo -u "$SYSTEM_USER" wp plugin install "$FEED_SLUG" --activate --path="$SITE_PATH" --allow-root 2>/dev/null; then
-            log "Feed/Channel: ${FEED_SLUG}"
-        else
-            warn "Plugin ${FEED_SLUG} fehlgeschlagen (Slug prüfen / WP-Repo erreichbar?)"
-        fi
-    done
+    # KEINE offiziellen Channel-Plugins (Google/Meta/TikTok for WooCommerce) und KEIN
+    #   Pinterest-Plugin (buggy) — PMW + PFM decken Pixel + Feeds vollständig ab.
+    info "Product Feed Manager wird installiert (Feed-Konfig je Shop manuell)..."
+    if sudo -u "$SYSTEM_USER" wp plugin install best-woocommerce-feed --activate --path="$SITE_PATH" --allow-root 2>/dev/null; then
+        log "Product Feed Manager (Free) installiert"
+    else
+        warn "Product Feed Manager fehlgeschlagen (Slug: best-woocommerce-feed)"
+    fi
+
+    # ── Pixel Manager (PMW): EIN Pixel-Tool für alle Ad-Plattformen ──────────
+    # Free = Google Ads + GA4 + Meta. Pro (Bucket-ZIP) = TikTok, Pinterest,
+    #   Microsoft/Bing, Snapchat … + Server-Side CAPI. Ersetzt Google Tag Manager.
+    #   Consent-Gating je Shop über FAZ Cookie Manager (Consent Mode v2).
+    #   Pixel-IDs/CAPI je Shop manuell in der GUI. KEIN GA4 konfigurieren.
+    if sudo -u "$SYSTEM_USER" wp plugin install woocommerce-google-adwords-conversion-tracking-tag --activate --path="$SITE_PATH" --allow-root 2>/dev/null; then
+        log "Pixel Manager (Free-Basis) installiert"
+    else
+        warn "Pixel Manager fehlgeschlagen (Slug: woocommerce-google-adwords-conversion-tracking-tag)"
+    fi
+    if [[ -f "${PLUGINS_DIR}/pixel-manager-pro.zip" ]]; then
+        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/pixel-manager-pro.zip" \
+            --activate --path="$SITE_PATH" --allow-root
+        log "Pixel Manager PRO installiert (TikTok/Pinterest/Bing + Server-Side CAPI)"
+    else
+        warn "Pixel Manager PRO ZIP fehlt: ${PLUGINS_DIR}/pixel-manager-pro.zip — für TikTok/Pinterest/Bing + CAPI nötig"
+    fi
 fi
 
 # ── MainWP Child (Remote-Verwaltung via zentralem MainWP Dashboard) ───────

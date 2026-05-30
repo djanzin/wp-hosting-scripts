@@ -304,14 +304,17 @@ Kein Blocksy, kein WooCommerce, kein MainWP Child auf der Dashboard-Site selbst.
 - **Rechnungen via WowInvoice** — auto-installiert aus `wowinvoice-pro.zip` (Premium-only, kein wp.org-Free). PDF-Rechnungen + Packing Slips.
 - **Payment Gateways** automatisch installiert + aktiviert (API-Keys je Shop manuell): Mollie, PayPal Payments, Stripe, Amazon Pay
 - **FunnelKit Automations** (Free-Basis + Pro-ZIP `funnelkit-automations-pro.zip`) für E-Mail-Marketing (Warenkorbabbruch, Broadcasts) — ergänzt WowRevenue (On-Site-Funnels)
-- **Produktfeeds + Marketing-Channels** automatisch installiert + aktiviert:
-  - **Product Feed Manager** (`best-woocommerce-feed`, Free) — CSV/XML-Feeds für Idealo/Preisvergleiche/Affiliate. Free deckt 24h-Schedule, Custom Fields, Varianten als eigene Zeilen ab (Limit 200 Produkte/Feed → Pro-Lizenz manuell auf großen Shops)
-  - **Google for WooCommerce** (`google-listings-and-ads`), **Facebook for WooCommerce** (`facebook-for-woocommerce`), **TikTok** (`tiktok-for-business`) — API-Sync statt CSV für die großen Ad-Plattformen
+- **Produktfeeds + Tracking (Lean-Architektur)** — ein Feed-Tool, ein Pixel-Tool:
+  - **Product Feed Manager** (`best-woocommerce-feed`, Free) — erzeugt **alle** Kataloge/Feeds: Google (Content-API-Auto-Sync), Meta, TikTok, Pinterest, Bing Shopping, Idealo/Preisvergleiche. 24h-Schedule, Custom Fields, Varianten als Zeilen (Limit 200 Produkte/Feed → Pro-Lizenz manuell auf großen Shops)
+  - **Pixel Manager** (`woocommerce-google-adwords-conversion-tracking-tag`, Free + `pixel-manager-pro.zip`) — **ein** Pixel-Tool für alle Ad-Plattformen (Google Ads, Meta, TikTok, Pinterest, Bing) + Server-Side CAPI. Ersetzt Google Tag Manager. Consent-gated über FAZ.
+  - **Analytics = Matomo** via SEOpress-Modul (cookieless, consent-frei). **Kein GA4, kein GTM.**
+  - Keine offiziellen Channel-Plugins (redundant durch PMW+PFM), kein buggy Pinterest-Plugin.
+
+> 📡 **Tracking/Consent-Details + Pro-Shop-Checkliste:** siehe [`docs/tracking-consent.md`](docs/tracking-consent.md)
 
 > ⚠️ Rechtliche Texte müssen manuell befüllt werden. Empfehlung: [IT-Recht Kanzlei](https://www.it-recht-kanzlei.de) (Digital-Paket).
 > 💳 Payment Gateways werden nur installiert — API-Keys/Modus konfigurierst du pro Shop in WooCommerce → Zahlungen.
-> 📡 **Feed-/Channel-Setup je Shop:** Produktfeed (Idealo/Preisvergleich) im PFM-GUI als CSV anlegen → Schedule „daily" → öffentliche URL eintragen. Google/Meta/TikTok: jeweiliges Plugin mit dem Werbekonto verbinden (Merchant Center / Meta Business / TikTok Business). EAN wird aus dem nativen WooCommerce-GTIN-Feld gemappt.
-> 🟣 **TikTok:** Shop-Features enden 2026-06-01, Ads/Katalog laufen weiter. Plugin nur aktiv lassen, wenn du TikTok-Ads fährst.
+> 📡 **Feed-/Pixel-/Consent-Setup je Shop:** im PFM-GUI je Plattform einen Feed anlegen (Template, Schedule „daily"); im Pixel Manager die Pixel-IDs + CAPI eintragen; in SEOpress Matomo aktivieren (cookieless); FAZ als einzige CMP (Consent Mode v2). Vollständige Schritt-für-Schritt-Checkliste: [`docs/tracking-consent.md`](docs/tracking-consent.md).
 
 ---
 
@@ -363,6 +366,7 @@ r2:wp-plugins/                          ← private/Pro-Plugin-ZIPs
 ├── blocksy-companion-pro.zip
 ├── fluentformpro.zip                   ← Fluent Forms Pro (alle Sites)
 ├── funnelkit-automations-pro.zip       ← E-Mail-Marketing (Woo)
+├── pixel-manager-pro.zip               ← alle Ad-Pixel + Server-Side CAPI (Woo)
 ├── mainwp-child.zip                    ← MainWP Child (auf JEDER Site auto-installiert)
 ├── mainwp-dashboard.zip                ← MainWP Dashboard (nur 1× zentral, kein Auto-Install)
 ├── postxpro.zip                        ← Tech-Blog-Blocks
@@ -403,8 +407,8 @@ beim Setup automatisch heruntergeladen:
 | **WowInvoice** (PDF-Rechnungen, Premium-only) | — | ✓ | — |
 | **FunnelKit Automations** (E-Mail-Marketing) | — | ✓ | — |
 | **Payment Gateways** (Mollie, PayPal, Stripe, Amazon Pay) | — | ✓ | — |
-| **Product Feed Manager** (Free, CSV-Feeds Idealo/Preisvergleich) | — | ✓ | — |
-| **Google / Meta / TikTok** for WooCommerce (API-Channels) | — | ✓ | — |
+| **Product Feed Manager** (Free, alle Feeds: Google/Meta/TikTok/Pinterest/Bing/Idealo) | — | ✓ | — |
+| **Pixel Manager** (Free + Pro-ZIP, alle Ad-Pixel + CAPI, ersetzt GTM) | — | ✓ | — |
 | WooCommerce | — | ✓ | — |
 
 **Plugin-/Theme-Updates:** Nach Upload einer neuen ZIP-Version in den jeweiligen Bucket:
