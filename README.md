@@ -36,7 +36,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL + Authentik-OIDC für MainW
 | `install-wp.sh` | Web-VM | Neue WordPress- oder WooCommerce-Site anlegen | Pro neue Site |
 | `delete-wp.sh` | Web-VM | Site vollständig entfernen | Bei Bedarf |
 | `maintenance.sh` | Web-VM | Maintenance Mode ein-/ausschalten | Bei Bedarf |
-| `update-wp.sh` | Web-VM | WordPress Core, Plugins, Themes aktualisieren | Regelmäßig |
+| `update-wp.sh` | Web-VM | Manuelles CLI-Update einzelner Sites (mit Pre-Update-Snapshots) — Updates laufen primär über MainWP | Fallback |
 | `list-sites.sh` | Web-VM | Alle Sites mit Status anzeigen | Bei Bedarf |
 | `clone-site.sh` | Web-VM | Bestehende Site auf neue Domain klonen | Bei Bedarf |
 | `migrate-wp.sh` | Web-VM | Externe WordPress-Site importieren | Bei Bedarf |
@@ -327,7 +327,6 @@ Kein Blocksy, kein WooCommerce, kein MainWP Child auf der Dashboard-Site selbst.
 | 🟢 Disk OK | Partition wieder < 80% | Webhook (Recovery) |
 | 🔴 SSL Fehler | Zertifikat läuft in < 2 Tagen ab (Erneuerung fehlgeschlagen) | Webhook (alle 6h) |
 | 🟢 SSL OK | Zertifikat nach Fehler erfolgreich erneuert | Webhook (Recovery) |
-| Auto-Update | Wöchentlicher Update-Lauf abgeschlossen | Webhook (sonntags 03:00) |
 | 🔴 Backup defekt | tar-Integrität oder age-Decrypt fehlgeschlagen | Webhook (sonntags 04:00) |
 | fail2ban | wp-login Brute-Force, xmlrpc, PHP in Uploads | IP-Ban (1h–24h) |
 
