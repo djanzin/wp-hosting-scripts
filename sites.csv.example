@@ -1,0 +1,16 @@
+# Batch-Install-Liste für batch-install.sh
+# Eine Zeile pro Site. Spalten: domain,type,shop_name,admin_ip
+#   domain     = Domain ohne https:// (z.B. meinshop.de)
+#   type       = wordpress | woocommerce | mainwp
+#   shop_name  = nur bei woocommerce (E-Mail-Absendername); leer = Domain
+#   admin_ip   = optional, beschränkt wp-admin/wp-login auf diese IP; leer = kein Limit
+# Leerzeilen und #-Kommentare werden ignoriert. Die Header-Zeile darunter ebenfalls.
+domain,type,shop_name,admin_ip
+# ── Blogs ──
+blog1.example.com,wordpress,,
+blog2.example.com,wordpress,,
+# ── Shops ──
+best4software.de,woocommerce,Best4Software,
+best4backup.de,woocommerce,Best4Backup,
+# ── Beispiel mit Admin-IP-Whitelist ──
+interner-shop.de,woocommerce,Interner Shop,203.0.113.10

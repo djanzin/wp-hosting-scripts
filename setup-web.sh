@@ -13,6 +13,51 @@ info() { echo -e "${BLUE}[i]${NC} $1"; }
 [[ $EUID -ne 0 ]] && err "Als root ausführen: sudo bash setup-web.sh"
 [[ ! -f /etc/os-release ]] || ! grep -q "24.04" /etc/os-release && warn "Skript optimiert für Ubuntu 24.04"
 
+# ── Optionaler Config-Modus (reproduzierbarer, non-interaktiver Aufbau) ─────
+# Usage: sudo bash setup-web.sh --config setup-web.conf
+# Die Config setzt die unten abgefragten Variablen vorab; gesetzte Werte werden
+# NICHT erneut erfragt. Fehlende Pflichtfelder brechen wie gewohnt mit Fehler ab.
+NONINT=false
+CONFIG_FILE=""
+_ARGS=("$@")
+_i=0
+while [[ $_i -lt ${#_ARGS[@]} ]]; do
+    case "${_ARGS[$_i]}" in
+        --config) _i=$((_i+1)); CONFIG_FILE="${_ARGS[$_i]:-}" ;;
+        --yes|--non-interactive) NONINT=true ;;
+        --help|-h) echo "Usage: sudo bash setup-web.sh [--config <datei>] [--yes]"; exit 0 ;;
+    esac
+    _i=$((_i+1))
+done
+if [[ -n "$CONFIG_FILE" ]]; then
+    [[ -f "$CONFIG_FILE" ]] || err "Config-Datei nicht gefunden: ${CONFIG_FILE}"
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+    NONINT=true
+    info "Config-Modus: ${CONFIG_FILE} (non-interaktiv)"
+fi
+
+# ask VAR "Prompt"  — fragt nur interaktiv und nur wenn VAR noch leer ist.
+# Im Config-Modus bleibt ein nicht gesetzter Wert leer (Pflichtprüfung folgt beim Aufrufer).
+ask() {
+    local __var="$1" __prompt="$2"
+    [[ -n "${!__var:-}" ]] && return 0
+    if $NONINT; then printf -v "$__var" '%s' ""; return 0; fi
+    read -rp "$__prompt" "$__var"
+}
+ask_secret() {
+    local __var="$1" __prompt="$2"
+    [[ -n "${!__var:-}" ]] && return 0
+    if $NONINT; then printf -v "$__var" '%s' ""; return 0; fi
+    read -rsp "$__prompt" "$__var"; echo ""
+}
+# confirm "Prompt"  — im Config/NONINT-Modus automatisch ja.
+confirm_or_die() {
+    $NONINT && return 0
+    local ans; read -rp "$1" ans
+    [[ "$ans" != "j" && "$ans" != "J" ]] && err "Abgebrochen."
+}
+
 clear
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════╗"
@@ -21,61 +66,72 @@ echo "╚═══════════════════════�
 echo -e "${NC}"
 
 # ── VM-Typ ─────────────────────────────────────────────────────────────────
-echo "Welche Art von Web-VM wird eingerichtet?"
-echo "  1) WordPress (Standard)"
-echo "  2) WooCommerce (Performance-optimiert)"
-echo "  3) MainWP Dashboard (Admin-only, viel RAM, kein public Frontend)"
-echo ""
-read -rp "Auswahl [1/2/3]: " vm_choice
-case "$vm_choice" in
-    1) VM_TYPE="wordpress" ;;
-    2) VM_TYPE="woocommerce" ;;
-    3) VM_TYPE="mainwp" ;;
-    *) err "Ungültige Auswahl." ;;
+# Config-Modus: VM_TYPE direkt (wordpress|woocommerce|mainwp) setzen.
+if [[ -z "${VM_TYPE:-}" ]]; then
+    echo "Welche Art von Web-VM wird eingerichtet?"
+    echo "  1) WordPress (Standard)"
+    echo "  2) WooCommerce (Performance-optimiert)"
+    echo "  3) MainWP Dashboard (Admin-only, viel RAM, kein public Frontend)"
+    echo ""
+    read -rp "Auswahl [1/2/3]: " vm_choice
+    case "$vm_choice" in
+        1) VM_TYPE="wordpress" ;;
+        2) VM_TYPE="woocommerce" ;;
+        3) VM_TYPE="mainwp" ;;
+        *) err "Ungültige Auswahl." ;;
+    esac
+fi
+case "$VM_TYPE" in
+    wordpress|woocommerce|mainwp) ;;
+    *) err "Ungültiger VM_TYPE: ${VM_TYPE} (erlaubt: wordpress, woocommerce, mainwp)" ;;
 esac
 
-# ── Konfiguration abfragen ─────────────────────────────────────────────────
+# ── Konfiguration abfragen (interaktiv oder aus --config) ──────────────────
 echo ""
-read -rp "IP-Adresse der Datenbank-VM (z.B. 192.168.1.100): " DB_HOST
-[[ -z "$DB_HOST" ]] && err "DB-Host darf nicht leer sein."
+DB_HOST="${DB_HOST:-}";           ask DB_HOST          "IP-Adresse der Datenbank-VM (z.B. 192.168.1.100): "
+[[ -z "$DB_HOST" ]] && err "DB-Host darf nicht leer sein (Config: DB_HOST)."
 
-read -rp "DB-Admin-Benutzer (von setup-db.sh ausgegeben): " DB_ADMIN_USER
-[[ -z "$DB_ADMIN_USER" ]] && err "DB-Admin-Benutzer darf nicht leer sein."
+DB_ADMIN_USER="${DB_ADMIN_USER:-}"; ask DB_ADMIN_USER  "DB-Admin-Benutzer (von setup-db.sh ausgegeben): "
+[[ -z "$DB_ADMIN_USER" ]] && err "DB-Admin-Benutzer darf nicht leer sein (Config: DB_ADMIN_USER)."
 
-read -rsp "DB-Admin-Passwort (von setup-db.sh ausgegeben): " DB_ADMIN_PASS
-echo ""
-[[ -z "$DB_ADMIN_PASS" ]] && err "DB-Admin-Passwort darf nicht leer sein."
+DB_ADMIN_PASS="${DB_ADMIN_PASS:-}"; ask_secret DB_ADMIN_PASS "DB-Admin-Passwort (von setup-db.sh ausgegeben): "
+[[ -z "$DB_ADMIN_PASS" ]] && err "DB-Admin-Passwort darf nicht leer sein (Config: DB_ADMIN_PASS)."
 
-read -rp "Standard-Admin-E-Mail für WordPress-Sites: " WP_ADMIN_EMAIL
-[[ -z "$WP_ADMIN_EMAIL" ]] && err "E-Mail darf nicht leer sein."
+WP_ADMIN_EMAIL="${WP_ADMIN_EMAIL:-}"; ask WP_ADMIN_EMAIL "Standard-Admin-E-Mail für WordPress-Sites: "
+[[ -z "$WP_ADMIN_EMAIL" ]] && err "E-Mail darf nicht leer sein (Config: WP_ADMIN_EMAIL)."
 
-# NPM-IP Auto-Detection: erste IP im selben /24 wie diese VM, die :81 (NPM-Admin) öffnet
-# Nutzt /dev/tcp (Bash builtin) — keine externen Tools nötig
-NPM_IP_GUESS=""
-MY_IP=$(hostname -I | awk '{print $1}')
-if [[ -n "$MY_IP" ]]; then
-    SUBNET="${MY_IP%.*}"
-    info "Suche NPM im Subnetz ${SUBNET}.0/24 (Port 81)..."
-    for i in $(seq 1 254); do
-        CANDIDATE="${SUBNET}.${i}"
-        [[ "$CANDIDATE" == "$MY_IP" ]] && continue
-        if timeout 0.3 bash -c "</dev/tcp/${CANDIDATE}/81" 2>/dev/null; then
-            NPM_IP_GUESS="$CANDIDATE"
-            break
-        fi
-    done
+# NPM-IP: aus Config (NPM_IP) übernehmen, sonst Auto-Detection + Prompt.
+# Auto-Detection: erste IP im selben /24, die :81 (NPM-Admin) öffnet (Bash /dev/tcp).
+if [[ -z "${NPM_IP:-}" ]]; then
+    NPM_IP_GUESS=""
+    MY_IP=$(hostname -I | awk '{print $1}')
+    if [[ -n "$MY_IP" ]] && ! $NONINT; then
+        SUBNET="${MY_IP%.*}"
+        info "Suche NPM im Subnetz ${SUBNET}.0/24 (Port 81)..."
+        for i in $(seq 1 254); do
+            CANDIDATE="${SUBNET}.${i}"
+            [[ "$CANDIDATE" == "$MY_IP" ]] && continue
+            if timeout 0.3 bash -c "</dev/tcp/${CANDIDATE}/81" 2>/dev/null; then
+                NPM_IP_GUESS="$CANDIDATE"
+                break
+            fi
+        done
+    fi
+    if $NONINT; then
+        NPM_IP="127.0.0.1"
+        warn "NPM_IP nicht in Config — Fallback 127.0.0.1 (Real-IP ggf. nachpflegen)."
+    elif [[ -n "$NPM_IP_GUESS" ]]; then
+        read -rp "IP-Adresse des Nginx Proxy Managers (Vorschlag: ${NPM_IP_GUESS}): " NPM_IP
+        [[ -z "$NPM_IP" ]] && NPM_IP="$NPM_IP_GUESS"
+    else
+        read -rp "IP-Adresse des Nginx Proxy Managers (für Real-IP): " NPM_IP
+        [[ -z "$NPM_IP" ]] && NPM_IP="127.0.0.1"
+    fi
 fi
-if [[ -n "$NPM_IP_GUESS" ]]; then
-    read -rp "IP-Adresse des Nginx Proxy Managers (Vorschlag: ${NPM_IP_GUESS}): " NPM_IP
-    [[ -z "$NPM_IP" ]] && NPM_IP="$NPM_IP_GUESS"
-else
-    read -rp "IP-Adresse des Nginx Proxy Managers (für Real-IP): " NPM_IP
-    [[ -z "$NPM_IP" ]] && NPM_IP="127.0.0.1"
-fi
 
-read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
-
-read -rsp "SEOpress Pro Lizenz-Key (leer = überspringen): " SEOPRESS_KEY; echo ""
+# Optionale Felder (leer erlaubt) — nur interaktiv erfragen wenn nicht in Config gesetzt.
+WEBHOOK_URL="${WEBHOOK_URL:-}";  $NONINT || read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
+SEOPRESS_KEY="${SEOPRESS_KEY:-}"; $NONINT || { read -rsp "SEOpress Pro Lizenz-Key (leer = überspringen): " SEOPRESS_KEY; echo ""; }
 
 echo ""
 echo -e "${BOLD}Remote-Backup für WordPress-Dateien (wp-content) — PFLICHT${NC}"
@@ -87,72 +143,101 @@ echo ""
 # Hostname für eindeutigen Pfad (verhindert Kollisionen mehrerer Web-VMs auf gleichem Bucket)
 WEB_HOSTNAME=$(hostname -s)
 
-RCLONE_REMOTE=""
-while [[ -z "$RCLONE_REMOTE" ]]; do
-    read -rp "Auswahl [1-3]: " RCLONE_CHOICE
-    case "$RCLONE_CHOICE" in
-        1)
-            read -rp "R2 Account-ID: " R2_ACCOUNT_ID
-            read -rp "R2 Access Key ID: " R2_KEY_ID
-            read -rsp "R2 Access Key Secret: " R2_KEY_SECRET; echo ""
-            read -rp "R2 Bucket-Name: " R2_BUCKET
-            [[ -z "$R2_ACCOUNT_ID" || -z "$R2_KEY_ID" || -z "$R2_KEY_SECRET" || -z "$R2_BUCKET" ]] && \
-                { warn "Alle R2-Felder sind Pflicht — bitte erneut eingeben."; continue; }
-            RCLONE_REMOTE="r2"
+RCLONE_REMOTE="${RCLONE_REMOTE:-}"
+if [[ -n "$RCLONE_REMOTE" ]]; then
+    # ── Config-Modus: Remote-Backup vorab gesetzt ──
+    # Erwartet aus Config: RCLONE_REMOTE (r2|s3backup|sftpbackup) + RCLONE_CHOICE (1|2|3)
+    # + die jeweiligen Felder (R2_* / S3_* / SFTP_*). RCLONE_DEST wird hier abgeleitet.
+    case "$RCLONE_REMOTE" in
+        r2)
+            [[ -z "${R2_ACCOUNT_ID:-}" || -z "${R2_KEY_ID:-}" || -z "${R2_KEY_SECRET:-}" || -z "${R2_BUCKET:-}" ]] && \
+                err "R2-Config unvollständig (R2_ACCOUNT_ID/R2_KEY_ID/R2_KEY_SECRET/R2_BUCKET)."
+            RCLONE_CHOICE=1
             RCLONE_DEST="r2:${R2_BUCKET}/wp-files-${WEB_HOSTNAME}"
             ;;
-        2)
-            read -rp "S3 Region (z.B. eu-central-1): " S3_REGION
-            read -rp "S3 Bucket-Name: " S3_BUCKET
-            read -rp "S3 Access Key ID: " S3_KEY_ID
-            read -rsp "S3 Access Key Secret: " S3_KEY_SECRET; echo ""
-            read -rp "S3 Endpoint (leer = AWS Standard): " S3_ENDPOINT
-            [[ -z "$S3_BUCKET" || -z "$S3_KEY_ID" || -z "$S3_KEY_SECRET" ]] && \
-                { warn "Bucket, Key-ID und Secret sind Pflicht — bitte erneut eingeben."; continue; }
-            RCLONE_REMOTE="s3backup"
+        s3backup)
+            [[ -z "${S3_BUCKET:-}" || -z "${S3_KEY_ID:-}" || -z "${S3_KEY_SECRET:-}" ]] && \
+                err "S3-Config unvollständig (S3_BUCKET/S3_KEY_ID/S3_KEY_SECRET)."
+            S3_REGION="${S3_REGION:-}"; S3_ENDPOINT="${S3_ENDPOINT:-}"
+            RCLONE_CHOICE=2
             RCLONE_DEST="s3backup:${S3_BUCKET}/wp-files-${WEB_HOSTNAME}"
             ;;
-        3)
-            read -rp "SFTP Host: " SFTP_HOST
-            read -rp "SFTP User: " SFTP_USER
-            read -rp "SFTP Pfad-Präfix (z.B. /backups): " SFTP_PATH
-            read -rp "SFTP Port [22]: " SFTP_PORT; SFTP_PORT=${SFTP_PORT:-22}
-            [[ -z "$SFTP_HOST" || -z "$SFTP_USER" || -z "$SFTP_PATH" ]] && \
-                { warn "Host, User und Pfad sind Pflicht — bitte erneut eingeben."; continue; }
-            RCLONE_REMOTE="sftpbackup"
+        sftpbackup)
+            [[ -z "${SFTP_HOST:-}" || -z "${SFTP_USER:-}" || -z "${SFTP_PATH:-}" ]] && \
+                err "SFTP-Config unvollständig (SFTP_HOST/SFTP_USER/SFTP_PATH)."
+            SFTP_PORT="${SFTP_PORT:-22}"
+            RCLONE_CHOICE=3
             RCLONE_DEST="sftpbackup:${SFTP_PATH}/wp-files-${WEB_HOSTNAME}"
             ;;
-        *) warn "Ungültig — Remote-Backup ist Pflicht. Bitte 1, 2 oder 3 wählen." ;;
+        *) err "Ungültiger RCLONE_REMOTE: ${RCLONE_REMOTE} (erlaubt: r2, s3backup, sftpbackup)." ;;
     esac
-done
+else
+    while [[ -z "$RCLONE_REMOTE" ]]; do
+        read -rp "Auswahl [1-3]: " RCLONE_CHOICE
+        case "$RCLONE_CHOICE" in
+            1)
+                read -rp "R2 Account-ID: " R2_ACCOUNT_ID
+                read -rp "R2 Access Key ID: " R2_KEY_ID
+                read -rsp "R2 Access Key Secret: " R2_KEY_SECRET; echo ""
+                read -rp "R2 Bucket-Name: " R2_BUCKET
+                [[ -z "$R2_ACCOUNT_ID" || -z "$R2_KEY_ID" || -z "$R2_KEY_SECRET" || -z "$R2_BUCKET" ]] && \
+                    { warn "Alle R2-Felder sind Pflicht — bitte erneut eingeben."; continue; }
+                RCLONE_REMOTE="r2"
+                RCLONE_DEST="r2:${R2_BUCKET}/wp-files-${WEB_HOSTNAME}"
+                ;;
+            2)
+                read -rp "S3 Region (z.B. eu-central-1): " S3_REGION
+                read -rp "S3 Bucket-Name: " S3_BUCKET
+                read -rp "S3 Access Key ID: " S3_KEY_ID
+                read -rsp "S3 Access Key Secret: " S3_KEY_SECRET; echo ""
+                read -rp "S3 Endpoint (leer = AWS Standard): " S3_ENDPOINT
+                [[ -z "$S3_BUCKET" || -z "$S3_KEY_ID" || -z "$S3_KEY_SECRET" ]] && \
+                    { warn "Bucket, Key-ID und Secret sind Pflicht — bitte erneut eingeben."; continue; }
+                RCLONE_REMOTE="s3backup"
+                RCLONE_DEST="s3backup:${S3_BUCKET}/wp-files-${WEB_HOSTNAME}"
+                ;;
+            3)
+                read -rp "SFTP Host: " SFTP_HOST
+                read -rp "SFTP User: " SFTP_USER
+                read -rp "SFTP Pfad-Präfix (z.B. /backups): " SFTP_PATH
+                read -rp "SFTP Port [22]: " SFTP_PORT; SFTP_PORT=${SFTP_PORT:-22}
+                [[ -z "$SFTP_HOST" || -z "$SFTP_USER" || -z "$SFTP_PATH" ]] && \
+                    { warn "Host, User und Pfad sind Pflicht — bitte erneut eingeben."; continue; }
+                RCLONE_REMOTE="sftpbackup"
+                RCLONE_DEST="sftpbackup:${SFTP_PATH}/wp-files-${WEB_HOSTNAME}"
+                ;;
+            *) warn "Ungültig — Remote-Backup ist Pflicht. Bitte 1, 2 oder 3 wählen." ;;
+        esac
+    done
+fi
 
 info "Remote-Backup-Pfad: ${BOLD}${RCLONE_DEST}${NC}"
 
-# Optional: Bucket für private/Pro-Plugin-ZIPs (SEOpress Pro, PostX Pro, WowRevenue etc.)
-echo ""
-read -rp "Bucket-Name für Plugin-ZIPs (z.B. wp-plugins, leer = überspringen): " PLUGIN_BUCKET
-if [[ -n "$PLUGIN_BUCKET" ]]; then
-    info "Plugin-Bucket: ${BOLD}${RCLONE_REMOTE}:${PLUGIN_BUCKET}${NC}"
-fi
+# Optionale Buckets (leer erlaubt) — interaktiv erfragen, sonst aus Config übernehmen.
+PLUGIN_BUCKET="${PLUGIN_BUCKET:-}"; $NONINT || read -rp "Bucket-Name für Plugin-ZIPs (z.B. wp-plugins, leer = überspringen): " PLUGIN_BUCKET
+[[ -n "$PLUGIN_BUCKET" ]] && info "Plugin-Bucket: ${BOLD}${RCLONE_REMOTE}:${PLUGIN_BUCKET}${NC}"
 
-# Optional: Bucket für private/Pro-Theme-ZIPs (Blocksy + Child etc.)
-read -rp "Bucket-Name für Theme-ZIPs (z.B. wp-themes, leer = überspringen): " THEME_BUCKET
-if [[ -n "$THEME_BUCKET" ]]; then
-    info "Theme-Bucket:  ${BOLD}${RCLONE_REMOTE}:${THEME_BUCKET}${NC}"
-fi
+THEME_BUCKET="${THEME_BUCKET:-}";   $NONINT || read -rp "Bucket-Name für Theme-ZIPs (z.B. wp-themes, leer = überspringen): " THEME_BUCKET
+[[ -n "$THEME_BUCKET" ]] && info "Theme-Bucket:  ${BOLD}${RCLONE_REMOTE}:${THEME_BUCKET}${NC}"
 
-echo ""
-read -rp "Backups mit age verschlüsseln? [j/N]: " ENABLE_AGE_CHOICE
-ENABLE_AGE=false
-[[ "$ENABLE_AGE_CHOICE" == "j" || "$ENABLE_AGE_CHOICE" == "J" ]] && ENABLE_AGE=true
+# age-Verschlüsselung: Config-Variable ENABLE_AGE (true/false) oder interaktiv.
+if [[ -z "${ENABLE_AGE:-}" ]]; then
+    if $NONINT; then
+        ENABLE_AGE=false
+    else
+        echo ""
+        read -rp "Backups mit age verschlüsseln? [j/N]: " ENABLE_AGE_CHOICE
+        ENABLE_AGE=false
+        [[ "$ENABLE_AGE_CHOICE" == "j" || "$ENABLE_AGE_CHOICE" == "J" ]] && ENABLE_AGE=true
+    fi
+fi
 
 echo ""
 info "VM-Typ: ${BOLD}${VM_TYPE}${NC}"
 info "DB-Host: ${BOLD}${DB_HOST}${NC}"
 $ENABLE_AGE && info "Backup-Verschlüsselung: ${BOLD}aktiv (age)${NC}"
 echo ""
-read -rp "Einrichtung starten? [j/N]: " confirm
-[[ "$confirm" != "j" && "$confirm" != "J" ]] && err "Abgebrochen."
+confirm_or_die "Einrichtung starten? [j/N]: "
 
 # ── System aktualisieren ───────────────────────────────────────────────────
 info "System wird aktualisiert..."
@@ -739,7 +824,7 @@ chmod 755 /var/sftp
 log "SFTP Chroot konfiguriert (/var/sftp)"
 
 echo ""
-read -rp "SSH Public Key für ubuntu-User hinterlegen? (leer = überspringen): " SSH_PUB_KEY
+SSH_PUB_KEY="${SSH_PUB_KEY:-}"; $NONINT || read -rp "SSH Public Key für ubuntu-User hinterlegen? (leer = überspringen): " SSH_PUB_KEY
 if [[ -n "$SSH_PUB_KEY" ]]; then
     mkdir -p /home/ubuntu/.ssh
     echo "$SSH_PUB_KEY" >> /home/ubuntu/.ssh/authorized_keys

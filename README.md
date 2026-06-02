@@ -51,6 +51,8 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL + Authentik-OIDC für MainW
 | `sync-plugins.sh` | Web-VM | Private Plugin-ZIPs (SEOpress Pro etc.) aus Plugin-Bucket nachladen | Bei Plugin-Update |
 | `db-backup.sh` | Datenbank-VM | Manueller MariaDB-Dump (Encryption + Remote-Mirror wie Auto-Cron, flock-protected) | Bei Bedarf |
 | `db-cleanup.sh` | Web-VM | DB-Cleanup aller Sites: Transients, Papierkorb, Spam, Action Scheduler, OPTIMIZE TABLE | Wöchentlich (Cron So 05:00) |
+| `batch-install.sh` | Web-VM | Mehrere Sites aus `sites.csv` non-interaktiv anlegen (Fehler-Sammlung + Zusammenfassung) | Massen-Anlage |
+| `check-dns.sh` | beliebig | DNS-/Mail-Readiness prüfen (A, www, SPF, DMARC, SES-DKIM) — pro Domain oder `--csv` | Vor Anlage |
 
 ---
 
@@ -109,9 +111,18 @@ sudo bash setup-web.sh
 
 Fragt nach: VM-Typ, DB-VM-IP, DB-Zugangsdaten, Admin-E-Mail, NPM-IP, Webhook-URL, SEOpress-Key, Remote-Backup-Ziel.
 
+> **Reproduzierbar/non-interaktiv:** `setup-web.conf.example` kopieren, ausfüllen, dann
+> `sudo bash setup-web.sh --config setup-web.conf`. Alle gesetzten Werte werden nicht
+> mehr abgefragt — ideal für mehrere identische Web-VMs.
+
 ---
 
 ### Schritt 5 — Neue Site anlegen
+
+> **Massen-Anlage:** Statt jede Site einzeln — `sites.csv.example` kopieren, Sites
+> eintragen (`domain,type,shop_name,admin_ip`), dann `sudo bash batch-install.sh sites.csv`
+> (vorher `--dry-run` zum Prüfen). DNS vorher checken: `bash check-dns.sh --csv sites.csv --ip <ip>`.
+> Siehe [`docs/dns-mail-setup.md`](docs/dns-mail-setup.md).
 
 ```bash
 curl -sO https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/install-wp.sh

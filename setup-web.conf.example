@@ -1,0 +1,57 @@
+# setup-web.conf — Vorlage für non-interaktiven Web-VM-Aufbau
+# Aufruf:  sudo bash setup-web.sh --config setup-web.conf
+#
+# Gesetzte Werte werden NICHT mehr abgefragt. Leere/fehlende Pflichtfelder
+# brechen mit klarer Fehlermeldung ab. Datei mit `chmod 600` schützen (enthält Secrets).
+
+# ── VM-Typ (Pflicht): wordpress | woocommerce | mainwp ──
+VM_TYPE=woocommerce
+
+# ── Datenbank-VM (Pflicht) ──
+DB_HOST=192.168.1.100
+DB_ADMIN_USER=wpadmin
+DB_ADMIN_PASS=CHANGE_ME
+
+# ── WordPress-Standard-Admin (Pflicht) ──
+WP_ADMIN_EMAIL=admin@deine-domain.de
+
+# ── NPM / Real-IP (optional; leer = Auto-Detect interaktiv bzw. 127.0.0.1) ──
+NPM_IP=192.168.1.50
+
+# ── Benachrichtigungen (optional) ──
+WEBHOOK_URL=https://uptime-kuma.example.com/api/push/DEIN_KEY
+
+# ── SEOpress Pro Lizenz-Key (optional) ──
+SEOPRESS_KEY=
+
+# ── Remote-Backup (Pflicht): RCLONE_REMOTE = r2 | s3backup | sftpbackup ──
+RCLONE_REMOTE=r2
+
+# -- R2 (wenn RCLONE_REMOTE=r2) --
+R2_ACCOUNT_ID=CHANGE_ME
+R2_KEY_ID=CHANGE_ME
+R2_KEY_SECRET=CHANGE_ME
+R2_BUCKET=wp-backups
+
+# -- S3 (wenn RCLONE_REMOTE=s3backup) --
+# S3_REGION=eu-central-1
+# S3_BUCKET=wp-backups
+# S3_KEY_ID=CHANGE_ME
+# S3_KEY_SECRET=CHANGE_ME
+# S3_ENDPOINT=                # leer = AWS-Standard
+
+# -- SFTP (wenn RCLONE_REMOTE=sftpbackup) --
+# SFTP_HOST=backup.example.com
+# SFTP_USER=bkp
+# SFTP_PATH=/backups
+# SFTP_PORT=22                # SSH-Key /root/.ssh/id_rsa muss am Ziel hinterlegt sein
+
+# ── Plugin-/Theme-Buckets (optional, leer = überspringen) ──
+PLUGIN_BUCKET=wp-plugins
+THEME_BUCKET=wp-themes
+
+# ── age-Backup-Verschlüsselung: true | false ──
+ENABLE_AGE=false
+
+# ── SSH Public Key für ubuntu-User (optional) ──
+SSH_PUB_KEY=
