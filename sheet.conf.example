@@ -1,0 +1,9 @@
+# sheet.conf — Verbindung zum n8n-Webhook, der das Google Sheet als CSV liefert
+# Kopieren nach ./sheet.conf oder /etc/wp-hosting/sheet.conf, dann chmod 600.
+
+# n8n-Webhook-URL (Production-URL des Workflows, liefert text/csv)
+SHEET_WEBHOOK_URL="https://n8n.example.com/webhook/wp-sites"
+
+# Optionaler Bearer-Token (im n8n-Webhook-Node als Header-Auth prüfen).
+# Leer lassen, wenn der Webhook ohne Auth läuft. Empfohlen: setzen.
+SHEET_WEBHOOK_TOKEN=""

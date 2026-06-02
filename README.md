@@ -53,6 +53,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL + Authentik-OIDC für MainW
 | `db-cleanup.sh` | Web-VM | DB-Cleanup aller Sites: Transients, Papierkorb, Spam, Action Scheduler, OPTIMIZE TABLE | Wöchentlich (Cron So 05:00) |
 | `batch-install.sh` | Web-VM | Mehrere Sites aus `sites.csv` non-interaktiv anlegen (Fehler-Sammlung + Zusammenfassung) | Massen-Anlage |
 | `check-dns.sh` | beliebig | DNS-/Mail-Readiness prüfen (A, www, SPF, DMARC, SES-DKIM) — pro Domain oder `--csv` | Vor Anlage |
+| `fetch-sheet.sh` | Web-VM | Site-Liste aus Google Sheet (via n8n-Webhook) holen → `sites.csv` | Vor Massen-Anlage |
 
 ---
 
@@ -123,6 +124,11 @@ Fragt nach: VM-Typ, DB-VM-IP, DB-Zugangsdaten, Admin-E-Mail, NPM-IP, Webhook-URL
 > eintragen (`domain,type,shop_name,admin_ip`), dann `sudo bash batch-install.sh sites.csv`
 > (vorher `--dry-run` zum Prüfen). DNS vorher checken: `bash check-dns.sh --csv sites.csv --ip <ip>`.
 > Siehe [`docs/dns-mail-setup.md`](docs/dns-mail-setup.md).
+>
+> **Site-Liste aus Google Sheet:** Sheet komfortabel pflegen, per n8n-Webhook als CSV
+> beziehen: `bash fetch-sheet.sh` → `sites.csv`. Setup (Sheet-Spalten + n8n-Workflow):
+> [`docs/google-sheet-setup.md`](docs/google-sheet-setup.md). Credentials bleiben am
+> Server (`setup-web.conf`), nur Inventardaten im Sheet.
 
 ```bash
 curl -sO https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/install-wp.sh
