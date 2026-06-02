@@ -10,9 +10,13 @@ Google Sheet ──> n8n (Webhook → Google Sheets → CSV) ──> fetch-sheet
 > **Sicherheits-Grenze:** Im Sheet stehen NUR nicht-geheime Inventardaten. Credentials
 > (DB-Passwort, R2/S3/SES-Keys) bleiben in `setup-web.conf` auf dem Server — niemals ins Sheet.
 
-## 1. Google Sheet anlegen
+## 1. Google Sheet anlegen (Master-Tabelle)
 
-Tabelle „Sites", **erste Zeile = Header** mit exakt diesen Spaltennamen:
+Tabelle „Sites", **erste Zeile = Header**. Die **ersten 4 Spalten in exakt dieser
+Reihenfolge** werden vom Installer verarbeitet, alle weiteren sind reine Referenz-/
+Tracking-Felder (zentrale Übersicht aller Sites):
+
+**Script-Spalten (Reihenfolge fix, werden installiert):**
 
 | domain | type | shop_name | admin_ip |
 |---|---|---|---|
@@ -23,8 +27,25 @@ Tabelle „Sites", **erste Zeile = Header** mit exakt diesen Spaltennamen:
 - `type` = `wordpress` | `woocommerce` | `mainwp`
 - `shop_name` nur bei woocommerce (leer = Domain)
 - `admin_ip` optional (wp-admin/Login auf IP beschränken)
-- Zusätzliche Spalten (z.B. `matomo_site_id`, Notizen) stören nicht — `batch-install.sh`
-  liest nur die ersten vier. Reihenfolge der vier muss stimmen.
+
+**Referenz-/Tracking-Spalten (ab Spalte 5, Installer ignoriert sie):**
+
+| Spalte | Zweck |
+|---|---|
+| `matomo_site_id` | Matomo Site-ID (Tracking-Eintrag manuell, siehe `tracking-consent.md`) |
+| `google_ads_id` | Google Ads Conversion-ID (in Pixel Manager) |
+| `meta_pixel_id` | Meta Pixel-ID |
+| `tiktok_pixel_id` | TikTok Pixel-ID |
+| `pinterest_tag` | Pinterest Tag-ID |
+| `bing_uet_id` | Microsoft/Bing UET-Tag-ID |
+| `ses_from_email` | FluentSMTP/SES-Absender (`noreply@domain.de`) |
+| `dns_ok` / `installed` / `live` | Status-Häkchen (`x`) |
+| `notes` | freie Notizen |
+
+> Vollständige Header-Zeile (kopierbar): siehe `sites.csv.example`. `batch-install.sh`
+> liest robust nur die ersten 4 Spalten — der Rest schadet nicht. **Die Reihenfolge der
+> ersten 4 muss aber stimmen.** Die Pixel-IDs sind hier nur Referenz; eingetragen werden
+> sie manuell in Pixel Manager / SEOpress je Shop (kein Auto-Push, da serialisiert).
 
 ## 2. n8n-Workflow
 
@@ -46,20 +67,22 @@ Drei Nodes:
      joint, oder „Convert to File" (CSV) → Binary zurückgeben.
    - Erste Zeile MUSS der Header `domain,type,shop_name,admin_ip` sein.
 
-   Beispiel Code-Node (Function) vor „Respond", erzeugt CSV-Text:
+   Beispiel Code-Node (Function) vor „Respond", erzeugt CSV-Text aus allen Spalten.
+   `COLS` = Reihenfolge der Spalten; die ersten 4 sind die Script-Spalten:
    ```js
-   const header = 'domain,type,shop_name,admin_ip';
+   const COLS = ['domain','type','shop_name','admin_ip',
+                 'matomo_site_id','google_ads_id','meta_pixel_id','tiktok_pixel_id',
+                 'pinterest_tag','bing_uet_id','ses_from_email','dns_ok','installed','live','notes'];
    const esc = v => {
      v = (v ?? '').toString();
      return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
    };
-   const rows = items.map(i => {
-     const d = i.json;
-     return [d.domain, d.type, d.shop_name, d.admin_ip].map(esc).join(',');
-   });
+   const header = COLS.join(',');
+   const rows = items.map(i => COLS.map(c => esc(i.json[c])).join(','));
    return [{ json: { csv: [header, ...rows].join('\n') } }];
    ```
    Im „Respond to Webhook"-Node dann `{{ $json.csv }}` als Body, Content-Type `text/csv`.
+   (Die Google-Sheets-Spaltennamen müssen den Keys in `COLS` entsprechen.)
 
 4. **Workflow aktivieren** → Production-Webhook-URL kopieren.
 
