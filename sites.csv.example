@@ -1,8 +1,8 @@
 # Site-Liste / Master-Tabelle für batch-install.sh (und Google Sheet)
 #
-# WICHTIG: batch-install.sh liest NUR die ersten 4 Spalten in EXAKT dieser Reihenfolge:
-#   domain , type , shop_name , admin_ip
-# Alle weiteren Spalten (matomo_site_id, Pixel-IDs, Status, Notizen) sind reine
+# WICHTIG: batch-install.sh verarbeitet die ersten 5 Spalten in EXAKT dieser Reihenfolge:
+#   domain , type , shop_name , admin_ip , matomo_site_id
+# Alle weiteren Spalten (Pixel-IDs, Status, Notizen) sind reine
 # REFERENZ/Tracking-Felder — sie werden vom Installer ignoriert (landen im Rest).
 # Du kannst sie also frei nutzen, um pro Site den Überblick zu behalten.
 #

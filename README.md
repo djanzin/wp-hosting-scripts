@@ -384,7 +384,7 @@ r2:wp-plugins/                          ← private/Pro-Plugin-ZIPs
 ├── funnelkit-automations-pro.zip       ← E-Mail-Marketing (Woo)
 ├── pixel-manager-pro.zip               ← alle Ad-Pixel + Server-Side CAPI (Woo)
 ├── mainwp-child.zip                    ← MainWP Child (auf JEDER Site auto-installiert)
-├── mainwp-dashboard.zip                ← MainWP Dashboard (nur 1× zentral, kein Auto-Install)
+├── mainwp-dashboard.zip                ← MainWP Dashboard (nur auf mainwp-VM auto-installiert)
 ├── postxpro.zip                        ← Tech-Blog-Blocks
 ├── seopress-pro.zip
 ├── wowinvoice-pro.zip                  ← PDF-Rechnungen (Woo, Premium-only)

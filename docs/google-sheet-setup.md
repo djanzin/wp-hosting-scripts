@@ -12,9 +12,9 @@ Google Sheet ──> n8n (Webhook → Google Sheets → CSV) ──> fetch-sheet
 
 ## 1. Google Sheet anlegen (Master-Tabelle)
 
-Tabelle „Sites", **erste Zeile = Header**. Die **ersten 4 Spalten in exakt dieser
-Reihenfolge** werden vom Installer verarbeitet, alle weiteren sind reine Referenz-/
-Tracking-Felder (zentrale Übersicht aller Sites):
+Tabelle „Sites", **erste Zeile = Header**. Die **ersten 5 Spalten in exakt dieser
+Reihenfolge** werden vom Installer verarbeitet (Spalte 5 = `matomo_site_id`), alle
+weiteren sind reine Referenz-/Tracking-Felder (zentrale Übersicht aller Sites):
 
 **Script-Spalten (Reihenfolge fix, werden installiert):**
 
@@ -68,7 +68,7 @@ Drei Nodes:
    - Erste Zeile MUSS der Header `domain,type,shop_name,admin_ip` sein.
 
    Beispiel Code-Node (Function) vor „Respond", erzeugt CSV-Text aus allen Spalten.
-   `COLS` = Reihenfolge der Spalten; die ersten 4 sind die Script-Spalten:
+   `COLS` = Reihenfolge der Spalten; die ersten 5 sind die Script-Spalten:
    ```js
    const COLS = ['domain','type','shop_name','admin_ip',
                  'matomo_site_id','google_ads_id','meta_pixel_id','tiktok_pixel_id',

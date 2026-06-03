@@ -423,8 +423,10 @@ log "MariaDB Backup-Cron konfiguriert (täglich 02:00, flock-protected → /var/
 
 # ── Disk Space Alert Script ───────────────────────────────────────────────
 mkdir -p /etc/wp-hosting /var/lib/wp-hosting/disk-state
+# DB-VM-lokale Config (nur WEBHOOK_URL nötig — disk-alert + mysql-backup-Cron).
+# Quotes: WEBHOOK_URL kann Sonderzeichen/Query-Params enthalten → sonst bricht das Sourcen.
 cat > /etc/wp-hosting/config <<CFGEOF
-WEBHOOK_URL=${WEBHOOK_URL:-}
+WEBHOOK_URL="${WEBHOOK_URL:-}"
 CFGEOF
 chmod 600 /etc/wp-hosting/config
 

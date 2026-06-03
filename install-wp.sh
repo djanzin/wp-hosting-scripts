@@ -1100,7 +1100,8 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
 fi
 
 # ── MainWP Child (Remote-Verwaltung via zentralem MainWP Dashboard) ───────
-# Standard auf beiden Site-Typen; Security ID schützt vor Hijack durch fremde Dashboards
+# Nur wordpress/woocommerce (dieser else-Zweig) — NICHT auf der mainwp-Dashboard-VM.
+# Security ID schützt vor Hijack durch fremde Dashboards.
 MAINWP_SECURITY_ID=""
 if [[ -f "${PLUGINS_DIR}/mainwp-child.zip" ]]; then
     sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/mainwp-child.zip" \
