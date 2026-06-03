@@ -28,11 +28,11 @@ Tracking-Felder (zentrale Übersicht aller Sites):
 - `shop_name` nur bei woocommerce (leer = Domain)
 - `admin_ip` optional (wp-admin/Login auf IP beschränken)
 
-**Referenz-/Tracking-Spalten (ab Spalte 5, Installer ignoriert sie):**
+**Spalte 5 wird verarbeitet, der Rest ist Referenz:**
 
 | Spalte | Zweck |
 |---|---|
-| `matomo_site_id` | Matomo Site-ID (Tracking-Eintrag manuell, siehe `tracking-consent.md`) |
+| `matomo_site_id` | **wird genutzt** → `install-wp.sh --matomo-site-id` setzt SEOpress-Matomo-Tracking (Host aus `MATOMO_URL`). Leer = übersprungen. |
 | `google_ads_id` | Google Ads Conversion-ID (in Pixel Manager) |
 | `meta_pixel_id` | Meta Pixel-ID |
 | `tiktok_pixel_id` | TikTok Pixel-ID |
@@ -43,9 +43,9 @@ Tracking-Felder (zentrale Übersicht aller Sites):
 | `notes` | freie Notizen |
 
 > Vollständige Header-Zeile (kopierbar): siehe `sites.csv.example`. `batch-install.sh`
-> liest robust nur die ersten 4 Spalten — der Rest schadet nicht. **Die Reihenfolge der
-> ersten 4 muss aber stimmen.** Die Pixel-IDs sind hier nur Referenz; eingetragen werden
-> sie manuell in Pixel Manager / SEOpress je Shop (kein Auto-Push, da serialisiert).
+> verarbeitet die **ersten 5 Spalten** (domain, type, shop_name, admin_ip, matomo_site_id),
+> der Rest (Pixel-IDs/Status/Notizen) ist Referenz. **Reihenfolge der ersten 5 muss stimmen.**
+> Die Pixel-IDs werden manuell in Pixel Manager je Shop eingetragen (kein Auto-Push, da serialisiert).
 
 ## 2. n8n-Workflow
 

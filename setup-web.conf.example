@@ -24,6 +24,10 @@ WEBHOOK_URL=https://uptime-kuma.example.com/api/push/DEIN_KEY
 # ── SEOpress Pro Lizenz-Key (optional) ──
 SEOPRESS_KEY=
 
+# ── Zentrale Matomo-Instanz (optional; Host OHNE https:// und ohne Slash) ──
+# Genutzt von: install-wp.sh --matomo-site-id <n>  → setzt SEOpress-Matomo-Tracking.
+MATOMO_URL=analytics.deine-domain.de
+
 # ── Remote-Backup (Pflicht): RCLONE_REMOTE = r2 | s3backup | sftpbackup ──
 RCLONE_REMOTE=r2
 

@@ -20,16 +20,18 @@ CLI_DOMAIN=""
 CLI_TYPE=""
 CLI_ADMIN_IP=""
 CLI_SHOP_NAME=""
+CLI_MATOMO_SITE_ID=""
 i=0
 ARGS=("$@")
 while [[ $i -lt ${#ARGS[@]} ]]; do
     case "${ARGS[$i]}" in
         --resume|--force) FORCE_RESUME=true ;;
         --yes|--non-interactive) NON_INTERACTIVE=true ;;
-        --domain)     i=$((i+1)); CLI_DOMAIN="${ARGS[$i]}" ;;
-        --type)       i=$((i+1)); CLI_TYPE="${ARGS[$i]}" ;;
-        --admin-ip)   i=$((i+1)); CLI_ADMIN_IP="${ARGS[$i]}" ;;
-        --shop-name)  i=$((i+1)); CLI_SHOP_NAME="${ARGS[$i]}" ;;
+        --domain)         i=$((i+1)); CLI_DOMAIN="${ARGS[$i]}" ;;
+        --type)           i=$((i+1)); CLI_TYPE="${ARGS[$i]}" ;;
+        --admin-ip)       i=$((i+1)); CLI_ADMIN_IP="${ARGS[$i]}" ;;
+        --shop-name)      i=$((i+1)); CLI_SHOP_NAME="${ARGS[$i]}" ;;
+        --matomo-site-id) i=$((i+1)); CLI_MATOMO_SITE_ID="${ARGS[$i]}" ;;
         -h|--help)
             cat <<HELP
 Usage: install-wp.sh [Optionen]
@@ -42,12 +44,14 @@ Non-Interaktiv (für Automation):
   sudo bash install-wp.sh --domain shop.de --type woocommerce --shop-name "Mein Shop" --yes
 
 Optionen:
-  --domain <name>      Domain (z.B. meinshop.de)
-  --type <wp|woo>      'wordpress' oder 'woocommerce'
-  --admin-ip <ip>      WP-Admin-Zugang auf IP beschränken
-  --shop-name <name>   Shop-Name (nur bei WooCommerce)
-  --yes                Bestätigungs-Prompts überspringen
-  --resume             Reste einer abgebrochenen Installation entfernen
+  --domain <name>         Domain (z.B. meinshop.de)
+  --type <wp|woo>         'wordpress' oder 'woocommerce'
+  --admin-ip <ip>         WP-Admin-Zugang auf IP beschränken
+  --shop-name <name>      Shop-Name (nur bei WooCommerce)
+  --matomo-site-id <n>    Matomo Site-ID → SEOpress-Matomo-Tracking aktivieren
+                          (Matomo-Host aus /etc/wp-hosting/config MATOMO_URL)
+  --yes                   Bestätigungs-Prompts überspringen
+  --resume                Reste einer abgebrochenen Installation entfernen
 HELP
             exit 0 ;;
     esac
@@ -909,6 +913,37 @@ if [[ -f "$SEOPRESS_PRO_ZIP" ]]; then
     log "SEOpress + SEOpress Pro installiert"
 else
     log "SEOpress installiert (Pro ZIP nicht gefunden → /etc/wp-hosting/plugins/seopress-pro.zip)"
+fi
+
+# ── Matomo-Tracking via SEOpress (optional, --matomo-site-id) ─────────────
+# Setzt die Matomo-Keys in der serialisierten Option seopress_google_analytics_option_name.
+# Keys/Format 1:1 aus SEOpress-Source: matomo_id = Host OHNE https:// und ohne Slash.
+# cookieless (no_cookies) + dnt = an → consent-frei (TTDSG/DSGVO). Merge statt Overwrite,
+# damit andere Analytics-Settings erhalten bleiben.
+if [[ -n "$CLI_MATOMO_SITE_ID" ]]; then
+    if [[ -z "${MATOMO_URL:-}" ]]; then
+        warn "Matomo Site-ID gesetzt, aber MATOMO_URL fehlt in /etc/wp-hosting/config — Matomo-Tracking übersprungen."
+    elif [[ ! "$CLI_MATOMO_SITE_ID" =~ ^[0-9]+$ ]]; then
+        warn "Ungültige Matomo Site-ID '${CLI_MATOMO_SITE_ID}' (nur Zahlen) — übersprungen."
+    else
+        # Host defensiv normalisieren (falls in Config doch mit Schema/Slash)
+        MATOMO_HOST="${MATOMO_URL#https://}"; MATOMO_HOST="${MATOMO_HOST#http://}"; MATOMO_HOST="${MATOMO_HOST%%/}"
+        sudo -u "$SYSTEM_USER" wp eval "
+            \$o = get_option('seopress_google_analytics_option_name');
+            if ( ! is_array(\$o) ) { \$o = array(); }
+            \$o['seopress_google_analytics_matomo_enable']      = '1';
+            \$o['seopress_google_analytics_matomo_self_hosted'] = '1';
+            \$o['seopress_google_analytics_matomo_id']          = '${MATOMO_HOST}';
+            \$o['seopress_google_analytics_matomo_site_id']     = '${CLI_MATOMO_SITE_ID}';
+            \$o['seopress_google_analytics_matomo_no_cookies']  = '1';
+            \$o['seopress_google_analytics_matomo_dnt']         = '1';
+            \$o['seopress_google_analytics_matomo_link_tracking'] = '1';
+            update_option('seopress_google_analytics_option_name', \$o);
+            echo 'ok';
+        " --path="$SITE_PATH" --allow-root >/dev/null 2>&1 \
+            && log "Matomo-Tracking aktiviert (SEOpress → ${MATOMO_HOST}, Site-ID ${CLI_MATOMO_SITE_ID}, cookieless)" \
+            || warn "Matomo-Tracking konnte nicht gesetzt werden (wp eval fehlgeschlagen)."
+    fi
 fi
 
 # ── FAZ Cookie Manager (DSGVO Cookie Consent) ────────────────────────────

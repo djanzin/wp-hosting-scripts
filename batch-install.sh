@@ -55,11 +55,13 @@ while IFS= read -r RAW || [[ -n "$RAW" ]]; do
         [[ "$LINE" == domain,* || "$LINE" == "domain" ]] && continue
     fi
 
-    IFS=',' read -r C_DOMAIN C_TYPE C_SHOP C_IP _REST <<< "$LINE"
+    # Spalten 1-5 werden verarbeitet (Spalte 5 = matomo_site_id); alles ab 6 = _REST (ignoriert).
+    IFS=',' read -r C_DOMAIN C_TYPE C_SHOP C_IP C_MATOMO _REST <<< "$LINE"
     DOMAIN="$(trim "${C_DOMAIN:-}")"
     TYPE="$(trim "${C_TYPE:-}")"
     SHOP="$(trim "${C_SHOP:-}")"
     IP="$(trim "${C_IP:-}")"
+    MATOMO_ID="$(trim "${C_MATOMO:-}")"
 
     if [[ -z "$DOMAIN" || -z "$TYPE" ]]; then
         warn "Zeile ${LINE_NO}: domain/type fehlt — übersprungen (${LINE})"
@@ -69,8 +71,9 @@ while IFS= read -r RAW || [[ -n "$RAW" ]]; do
 
     # install-wp.sh-Argumente zusammenbauen
     ARGS=(--domain "$DOMAIN" --type "$TYPE" --yes)
-    [[ -n "$SHOP" ]] && ARGS+=(--shop-name "$SHOP")
-    [[ -n "$IP"   ]] && ARGS+=(--admin-ip "$IP")
+    [[ -n "$SHOP"      ]] && ARGS+=(--shop-name "$SHOP")
+    [[ -n "$IP"        ]] && ARGS+=(--admin-ip "$IP")
+    [[ -n "$MATOMO_ID" ]] && ARGS+=(--matomo-site-id "$MATOMO_ID")
 
     echo ""
     echo -e "${BOLD}── [${LINE_NO}] ${DOMAIN} (${TYPE})${NC}"

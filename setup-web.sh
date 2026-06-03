@@ -132,6 +132,11 @@ fi
 # Optionale Felder (leer erlaubt) — nur interaktiv erfragen wenn nicht in Config gesetzt.
 WEBHOOK_URL="${WEBHOOK_URL:-}";  $NONINT || read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
 SEOPRESS_KEY="${SEOPRESS_KEY:-}"; $NONINT || { read -rsp "SEOpress Pro Lizenz-Key (leer = überspringen): " SEOPRESS_KEY; echo ""; }
+# Zentrale Matomo-Instanz (Host ohne https:// und ohne Slash, z.B. analytics.example.com).
+# Wird bei install-wp.sh --matomo-site-id genutzt, um SEOpress-Matomo-Tracking zu setzen.
+MATOMO_URL="${MATOMO_URL:-}"; $NONINT || read -rp "Matomo-Host (z.B. analytics.example.com, leer = überspringen): " MATOMO_URL
+# Defensiv: evtl. mitkopiertes Schema/Slash entfernen
+MATOMO_URL="${MATOMO_URL#https://}"; MATOMO_URL="${MATOMO_URL#http://}"; MATOMO_URL="${MATOMO_URL%%/}"
 
 echo ""
 echo -e "${BOLD}Remote-Backup für WordPress-Dateien (wp-content) — PFLICHT${NC}"
@@ -1224,6 +1229,7 @@ RCLONE_DEST=${RCLONE_DEST:-}
 PLUGIN_BUCKET=${PLUGIN_BUCKET:-}
 THEME_BUCKET=${THEME_BUCKET:-}
 SEOPRESS_KEY=${SEOPRESS_KEY:-}
+MATOMO_URL=${MATOMO_URL:-}
 PMA_AUTH_PASS=${PMA_AUTH_PASS}
 EOF
 chmod 600 /etc/wp-hosting/config

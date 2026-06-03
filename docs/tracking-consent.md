@@ -31,10 +31,13 @@ ersetzt GA4 (self-hosted, cookieless → misst alle Besucher, nicht nur Einwilli
 ## Pro-Shop-Einrichtung (GUI — manuell pro Shop)
 
 ### 1. Analytics — Matomo via SEOpress
-- SEOpress → **Analytics → Matomo**: „Enable Matomo tracking"
-- **Tracking-URL** = zentrale Matomo-Instanz (überall gleich), **Site-ID** = je Shop eigene
-- E-Commerce-Tracking aktivieren
-- **Cookieless + IP-Anonymisierung** → läuft consent-frei
+**Automatisierbar:** `install-wp.sh --matomo-site-id <n>` (bzw. CSV-Spalte `matomo_site_id`)
+setzt das SEOpress-Matomo-Tracking direkt — Host aus `MATOMO_URL` in
+`/etc/wp-hosting/config` (in `setup-web.sh` hinterlegt). Aktiviert: cookieless
+(`no_cookies`) + DNT → **consent-frei**, self-hosted, mit Site-ID.
+- Manuell (ohne Flag): SEOpress → **Analytics → Matomo** → „Enable Matomo tracking",
+  Tracking-URL = zentrale Instanz, Site-ID je Shop, cookieless.
+- E-Commerce-Tracking im SEOpress-Matomo-Tab je Shop noch aktivieren.
 - SEOpress-eigenen **Cookie-Banner: AUS** (FAZ ist die CMP)
 - **Kein GA4** einrichten
 
