@@ -1,0 +1,18 @@
+# Secrets / Tokens — NIEMALS committen
+*.token
+.forgejo-token
+*.secret
+.env
+
+# Echte Config-Dateien (nur *.example gehört ins Repo)
+setup-web.conf
+sheet.conf
+/config
+
+# rclone / Backup-Keys
+rclone.conf
+backup-key.txt
+*.age
+
+# macOS
+.DS_Store
