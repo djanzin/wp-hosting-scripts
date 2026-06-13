@@ -51,9 +51,7 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL + Authentik-OIDC für MainW
 | `sync-plugins.sh` | Web-VM | Private Plugin-ZIPs (SEOpress Pro etc.) aus Plugin-Bucket nachladen | Bei Plugin-Update |
 | `db-backup.sh` | Datenbank-VM | Manueller MariaDB-Dump (Encryption + Remote-Mirror wie Auto-Cron, flock-protected) | Bei Bedarf |
 | `db-cleanup.sh` | Web-VM | DB-Cleanup aller Sites: Transients, Papierkorb, Spam, Action Scheduler, OPTIMIZE TABLE | Wöchentlich (Cron So 05:00) |
-| `batch-install.sh` | Web-VM | Mehrere Sites aus `sites.csv` non-interaktiv anlegen (Fehler-Sammlung + Zusammenfassung) | Massen-Anlage |
-| `check-dns.sh` | beliebig | DNS-/Mail-Readiness prüfen (A, www, SPF, DMARC, SES-DKIM) — pro Domain oder `--csv` | Vor Anlage |
-| `fetch-sheet.sh` | Web-VM | Site-Liste aus Google Sheet (via n8n-Webhook) holen → `sites.csv` | Vor Massen-Anlage |
+| `check-dns.sh` | beliebig | DNS-/Mail-Readiness prüfen (A, www, SPF, DMARC, SES-DKIM) — eine oder mehrere Domains | Vor Anlage |
 
 ---
 
@@ -120,15 +118,8 @@ Fragt nach: VM-Typ, DB-VM-IP, DB-Zugangsdaten, Admin-E-Mail, NPM-IP, Webhook-URL
 
 ### Schritt 5 — Neue Site anlegen
 
-> **Massen-Anlage:** Statt jede Site einzeln — `sites.csv.example` kopieren, Sites
-> eintragen (`domain,type,shop_name,admin_ip`), dann `sudo bash batch-install.sh sites.csv`
-> (vorher `--dry-run` zum Prüfen). DNS vorher checken: `bash check-dns.sh --csv sites.csv --ip <ip>`.
-> Siehe [`docs/dns-mail-setup.md`](docs/dns-mail-setup.md).
->
-> **Site-Liste aus Google Sheet:** Sheet komfortabel pflegen, per n8n-Webhook als CSV
-> beziehen: `bash fetch-sheet.sh` → `sites.csv`. Setup (Sheet-Spalten + n8n-Workflow):
-> [`docs/google-sheet-setup.md`](docs/google-sheet-setup.md). Credentials bleiben am
-> Server (`setup-web.conf`), nur Inventardaten im Sheet.
+> **Tipp:** DNS/Mail vorab prüfen mit `bash check-dns.sh <domain> --ip <ip> --dkim <ses-token>`
+> (siehe [`docs/dns-mail-setup.md`](docs/dns-mail-setup.md)) — dann läuft der Pre-Flight-Check glatt durch.
 
 ```bash
 curl -sO https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/install-wp.sh

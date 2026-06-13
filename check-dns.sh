@@ -5,7 +5,7 @@
 # Usage:
 #   bash check-dns.sh example.com
 #   bash check-dns.sh example.com --ip 1.2.3.4         # A-Record gegen erwartete IP prüfen
-#   bash check-dns.sh --csv sites.csv                  # alle Domains aus der Batch-CSV
+#   bash check-dns.sh example.com shop.de blog.de      # mehrere Domains nacheinander
 #   bash check-dns.sh example.com --dkim xyz123        # SES-DKIM-Selektoren prüfen (Token)
 #
 # Braucht 'dig' (paket: dnsutils / bind-utils). Läuft auch ohne root.
@@ -19,28 +19,17 @@ note() { echo -e "  ${YELLOW}!${NC} $1"; }
 
 command -v dig >/dev/null 2>&1 || { echo -e "${RED}dig fehlt — installieren: apt-get install -y dnsutils${NC}"; exit 1; }
 
-EXPECT_IP=""; DKIM_TOKEN=""; CSV=""; DOMAINS=()
+EXPECT_IP=""; DKIM_TOKEN=""; DOMAINS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --ip)   EXPECT_IP="${2:-}"; shift 2 ;;
         --dkim) DKIM_TOKEN="${2:-}"; shift 2 ;;
-        --csv)  CSV="${2:-}"; shift 2 ;;
         --*)    echo "Unbekannte Option: $1"; exit 1 ;;
         *)      DOMAINS+=("$1"); shift ;;
     esac
 done
 
-# Domains aus CSV ziehen (erste Spalte, Header/Kommentare/Leerzeilen raus)
-if [[ -n "$CSV" ]]; then
-    [[ -f "$CSV" ]] || { echo -e "${RED}CSV nicht gefunden: ${CSV}${NC}"; exit 1; }
-    while IFS=',' read -r col1 _; do
-        col1="${col1%$'\r'}"; col1="${col1// /}"
-        [[ -z "$col1" || "$col1" == \#* || "$col1" == "domain" ]] && continue
-        DOMAINS+=("$col1")
-    done < "$CSV"
-fi
-
-[[ ${#DOMAINS[@]} -eq 0 ]] && { echo "Usage: bash check-dns.sh <domain> [--ip IP] [--dkim TOKEN] | --csv sites.csv"; exit 1; }
+[[ ${#DOMAINS[@]} -eq 0 ]] && { echo "Usage: bash check-dns.sh <domain> [<domain> ...] [--ip IP] [--dkim TOKEN]"; exit 1; }
 
 READY=0; ISSUES=0
 

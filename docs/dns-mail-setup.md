@@ -5,7 +5,7 @@ und der Pre-Flight-Check von `install-wp.sh` prüft die DNS-Auflösung. Wenn DNS
 SES-DKIM bereits stehen, läuft der Install glatt durch und Mail funktioniert sofort.
 
 Readiness prüfen: `bash check-dns.sh <domain> --ip <server-ip> --dkim <ses-token>`
-oder für alle Sites auf einmal: `bash check-dns.sh --csv sites.csv`
+(mehrere Domains: einfach hintereinander angeben).
 
 ## 1. DNS-Records (Cloudflare)
 
@@ -43,8 +43,8 @@ oder für alle Sites auf einmal: `bash check-dns.sh --csv sites.csv`
 1. **Jetzt zuerst:** alle A/www/SPF/DMARC + SES-Domains + DKIM-CNAMEs anlegen
    (reine Wartezeit, blockiert nichts).
 2. SES Production Access beantragen (einmalig).
-3. `bash check-dns.sh --csv sites.csv --ip <ip>` → bis alles „bereit".
-4. Erst dann `batch-install.sh` — Pre-Flight-Check ist dann grün.
+3. `bash check-dns.sh <domain> --ip <ip> --dkim <token>` → bis alles „bereit".
+4. Erst dann `install-wp.sh` je Site — Pre-Flight-Check ist dann grün.
 5. FluentSMTP-Connection je Shop nachziehen (oder über MainWP ausrollen).
 
 ## Schnell-Check eines fertigen Setups
