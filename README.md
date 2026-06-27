@@ -1,6 +1,40 @@
 # WP Hosting Scripts
 
-Vollautomatisiertes WordPress- und WooCommerce-Hosting auf Ubuntu 24.04 LTS mit Proxmox. Jede Site bekommt einen eigenen PHP-FPM-Pool, Systemuser, Datenbank, SFTP-Zugang und Filebrowser-User.
+![Shell](https://img.shields.io/badge/shell-bash-121011?logo=gnu-bash&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-Ubuntu%2024.04%20%2F%20Proxmox-E95420?logo=ubuntu&logoColor=white)
+![WordPress](https://img.shields.io/badge/WordPress-WooCommerce-21759B?logo=wordpress&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
+Vollautomatisiertes **WordPress-** und **WooCommerce-Hosting** auf Ubuntu 24.04 LTS mit Proxmox.
+Ein Satz Bash-Scripts richtet die komplette Infrastruktur ein und legt produktionsfertige Sites
+in Minuten an. Jede Site bekommt einen **eigenen PHP-FPM-Pool, Systemuser, Datenbank, SFTP-Zugang
+und Filebrowser-User** — sauber voneinander isoliert.
+
+**Was es kann (Kurzfassung):**
+
+- 🚀 **Eine VM-Vorlage, beliebig viele VMs** — Cloud-init-Template + Klon-Script für Proxmox
+- 🌐 **Multi-Tenant-Web-Stack** — Nginx + FastCGI-Cache, PHP 8.3-FPM (pro Site eigener Pool), Redis Object Cache
+- 🛍️ **WooCommerce-DE-ready** — rechtliche Seiten, Widerrufsrecht-Checkbox (§356/§312j BGB), 4 Payment-Gateways, PDF-Rechnungen
+- 📊 **Tracking lean & DSGVO-konform** — Matomo (cookieless) + Pixel Manager (alle Ad-Plattformen + CAPI) + FAZ Consent. Kein GA4/GTM.
+- 🔒 **Härtung out-of-the-box** — fail2ban, Rate-Limits, 2FA, Chroot-SFTP, Vhost-Hardening
+- 💾 **Backups + Monitoring** — täglich Files & DB, 7-Tage-Mirror nach R2/S3/SFTP (optional age-verschlüsselt), Backup-Verify, Disk-/SSL-Alerts
+- 🛠️ **MainWP-Dashboard** — eigene VM-Vorlage für zentrale Update-Verwaltung aller Child-Sites
+- 🔁 **Reproduzierbar** — config-getriebener, non-interaktiver Modus für Ansible/Automation
+
+## Inhaltsverzeichnis
+
+- [Architektur](#architektur)
+- [Scripts](#scripts)
+- [Komplette Einrichtung — Schritt für Schritt](#komplette-einrichtung--schritt-für-schritt)
+- [MainWP Dashboard auf eigener VM (optional)](#mainwp-dashboard-auf-eigener-vm-optional)
+- [Was wird pro Site installiert](#was-wird-pro-site-installiert)
+- [Monitoring & Alerts](#monitoring--alerts)
+- [Backup](#backup)
+- [Zugangsdaten](#zugangsdaten)
+- [SFTP-Zugang pro Site](#sftp-zugang-pro-site)
+- [Maintenance Mode](#maintenance-mode)
+- [Voraussetzungen](#voraussetzungen)
+- [Lizenz & Haftungsausschluss](#lizenz--haftungsausschluss)
 
 ## Architektur
 
@@ -57,20 +91,27 @@ Internet → Cloudflare → Nginx Proxy Manager (SSL + Authentik-OIDC für MainW
 
 ## Komplette Einrichtung — Schritt für Schritt
 
-> **🔑 Privates Repo — Scripts authentifiziert herunterladen.** `git.janzin.net/djanzin/wp-hosting-scripts`
-> ist privat; ein unauthentifizierter Download liefert eine Fehlerseite (führt zu „command not found").
-> Forgejo-Token einmal auf der Maschine ablegen (z.B. `/root/.forgejo-token`, `chmod 600`), dann referenzieren.
-> Der Einfachheit halber als Shell-Variable setzen:
+> **📥 Scripts laden — zwei Wege.** Das Repo ist öffentlich, also ist kein Token/Login nötig.
+>
+> **Variante A — ganzes Repo klonen (empfohlen).** Auf jeder Maschine (Proxmox-Host, DB-VM, Web-VMs)
+> einmal klonen, dann das jeweils benötigte Script ausführen:
 > ```bash
-> export FORGEJO_TOKEN="$(cat /root/.forgejo-token)"   # Token-Datei einmalig mit chmod 600 anlegen
+> git clone https://github.com/djanzin/wp-hosting-scripts.git
+> cd wp-hosting-scripts
 > ```
-> Die `curl`-Befehle unten nutzen `-fsS` (bricht bei HTTP-Fehler **laut** ab, statt eine Fehlerseite zu speichern)
-> und den Auth-Header. **Tipp:** nach jedem Download `head -3 <script>` prüfen — muss mit `#!/bin/bash` beginnen.
+>
+> **Variante B — einzelnes Script per `curl`.** Wenn `git` nicht installiert ist, lädst du nur das
+> Script, das du gerade brauchst (die Befehle in jedem Schritt unten sind genau dafür da):
+> ```bash
+> curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/<script>.sh
+> ```
+> `-fsSL` bricht bei HTTP-Fehler **laut** ab (statt eine Fehlerseite zu speichern) und folgt Redirects.
+> **Tipp:** nach dem Download `head -3 <script>` prüfen — muss mit `#!/bin/bash` beginnen.
 
 ### Schritt 1 — Template erstellen (Proxmox Host, einmalig)
 
 ```bash
-curl -fsS -H "Authorization: token ${FORGEJO_TOKEN}" -O https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/proxmox-create-template.sh
+curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/proxmox-create-template.sh
 bash proxmox-create-template.sh
 ```
 
@@ -81,7 +122,7 @@ Erstellt ein Ubuntu 24.04 Cloud-init Template (Standard-ID: 9000).
 ### Schritt 2 — VMs anlegen (Proxmox Host)
 
 ```bash
-curl -fsS -H "Authorization: token ${FORGEJO_TOKEN}" -O https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/proxmox-create-vm.sh
+curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/proxmox-create-vm.sh
 bash proxmox-create-vm.sh   # Datenbank-VM
 bash proxmox-create-vm.sh   # WordPress-VM
 bash proxmox-create-vm.sh   # WooCommerce-VM
@@ -102,7 +143,7 @@ bash proxmox-create-vm.sh   # WooCommerce-VM
 
 ```bash
 ssh ubuntu@<DB-VM-IP>
-curl -fsS -H "Authorization: token ${FORGEJO_TOKEN}" -O https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/setup-db.sh
+curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/setup-db.sh
 sudo bash setup-db.sh
 ```
 
@@ -114,7 +155,7 @@ Gibt DB-Admin-Zugangsdaten aus → für Schritt 4 notieren.
 
 ```bash
 ssh ubuntu@<WEB-VM-IP>
-curl -fsS -H "Authorization: token ${FORGEJO_TOKEN}" -O https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/setup-web.sh
+curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/setup-web.sh
 sudo bash setup-web.sh
 ```
 
@@ -132,7 +173,7 @@ Fragt nach: VM-Typ, DB-VM-IP, DB-Zugangsdaten, Admin-E-Mail, NPM-IP, Webhook-URL
 > (siehe [`docs/dns-mail-setup.md`](docs/dns-mail-setup.md)) — dann läuft der Pre-Flight-Check glatt durch.
 
 ```bash
-curl -fsS -H "Authorization: token ${FORGEJO_TOKEN}" -O https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/install-wp.sh
+curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/install-wp.sh
 sudo bash install-wp.sh
 ```
 
@@ -156,7 +197,7 @@ Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
 Jede neue Site startet im **Maintenance Mode**:
 
 ```bash
-curl -fsS -H "Authorization: token ${FORGEJO_TOKEN}" -O https://git.janzin.net/djanzin/wp-hosting-scripts/raw/branch/main/maintenance.sh
+curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/maintenance.sh
 sudo bash maintenance.sh
 ```
 
@@ -496,3 +537,16 @@ sudo bash maintenance.sh
 - Cloudflare (empfohlen, für Real-IP-Header)
 - VMs können sich gegenseitig per IP erreichen
 - Für Webhooks: Uptime Kuma Push Monitor URL (`https://…/api/push/<key>`)
+
+---
+
+## Lizenz & Haftungsausschluss
+
+Veröffentlicht unter der **MIT-Lizenz** — siehe [`LICENSE`](LICENSE). Nutzung auf eigene Verantwortung.
+
+> ⚠️ **Hinweis:** Diese Scripts richten Server produktiv ein, ändern Firewall-/Nginx-/DB-Konfiguration
+> und legen Cronjobs an. Vor dem Einsatz auf Produktivsystemen **auf einer Wegwerf-VM testen**.
+> Die im Repo enthaltenen IPs (`192.168.1.x`) sind Platzhalter-Defaults und werden bei der Einrichtung
+> abgefragt — keine echten Hosts. Pro/Premium-Plugin-ZIPs (SEOpress Pro, Blocksy Pro, Wow-Suite,
+> Pixel Manager Pro etc.) sind **nicht** Teil des Repos; sie werden zur Laufzeit aus einem privaten
+> Object-Storage-Bucket nachgeladen und erfordern eigene Lizenzen.
