@@ -195,7 +195,11 @@ IB_INSTANCES=$((IB_POOL_MB / 1024))
 [[ $IB_INSTANCES -lt 1 ]] && IB_INSTANCES=1
 [[ $IB_INSTANCES -gt 8 ]] && IB_INSTANCES=8
 
-cat > /etc/mysql/conf.d/wordpress-optimized.cnf <<EOF
+# WICHTIG: Nach mariadb.conf.d/ mit Präfix 99- ablegen, NICHT nach conf.d/.
+# my.cnf lädt conf.d/ VOR mariadb.conf.d/ — eine Datei in conf.d/ würde von
+# mariadb.conf.d/50-server.cnf (bind-address = 127.0.0.1) wieder überschrieben,
+# und MariaDB wäre trotz bind-address = 0.0.0.0 nur auf localhost erreichbar.
+cat > /etc/mysql/mariadb.conf.d/99-wordpress-optimized.cnf <<EOF
 [mysqld]
 # Zeichensatz
 character-set-server  = utf8mb4

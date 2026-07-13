@@ -756,6 +756,12 @@ SQL
 log "Datenbank angelegt: ${DB_NAME}"
 
 # ── WordPress installieren ────────────────────────────────────────────────
+# wp-cli 'rewrite structure/flush' nutzt intern runcommand(launch=true) und spawnt
+# einen Subprozess via proc_open, der das aktuelle Arbeitsverzeichnis erbt. Läuft das
+# Script aus /home/ubuntu (Standard bei 'sudo bash install-wp.sh'), kann der nologin-
+# Systemuser dieses cwd nicht betreten → posix_spawn 'Permission denied' → Fatal.
+# Daher ins Site-Verzeichnis wechseln, das dem Systemuser gehört.
+cd "$SITE_PATH"
 info "WordPress wird heruntergeladen..."
 sudo -u "$SYSTEM_USER" wp core download --path="$SITE_PATH" --locale=en_US --allow-root
 
@@ -906,7 +912,7 @@ sudo -u "$SYSTEM_USER" wp plugin install two-factor --activate --path="$SITE_PAT
 log "Two Factor installiert (→ Profil → Two Factor Options → QR-Code scannen)"
 
 # ── SEOpress ──────────────────────────────────────────────────────────────
-sudo -u "$SYSTEM_USER" wp plugin install seopress --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp plugin install wp-seopress --activate --path="$SITE_PATH" --allow-root
 SEOPRESS_PRO_ZIP="/etc/wp-hosting/plugins/seopress-pro.zip"
 if [[ -f "$SEOPRESS_PRO_ZIP" ]]; then
     sudo -u "$SYSTEM_USER" wp plugin install "$SEOPRESS_PRO_ZIP" --activate --path="$SITE_PATH" --allow-root

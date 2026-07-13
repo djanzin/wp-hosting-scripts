@@ -73,6 +73,12 @@ VM_DNS=${VM_DNS:-1.1.1.1}
 read -rp "Netzwerk-Bridge [Standard: vmbr0]: " VM_BRIDGE
 VM_BRIDGE=${VM_BRIDGE:-vmbr0}
 
+read -rp "VLAN-Tag (leer = kein Tag): " VM_VLAN
+if [[ -n "${VM_VLAN:-}" ]]; then
+    [[ ! "$VM_VLAN" =~ ^[0-9]+$ ]] && err "Ungültiger VLAN-Tag: ${VM_VLAN}"
+    { [[ "$VM_VLAN" -lt 1 ]] || [[ "$VM_VLAN" -gt 4094 ]]; } && err "VLAN-Tag außerhalb 1-4094: ${VM_VLAN}"
+fi
+
 read -rp "MAC-Adresse (leer = automatisch generieren): " VM_MAC
 if [[ -n "$VM_MAC" ]]; then
     [[ ! "$VM_MAC" =~ ^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$ ]] && \
@@ -116,6 +122,7 @@ echo -e "  Disk:     ${BOLD}${VM_DISK} GB${NC}"
 echo -e "  IP:       ${BOLD}${VM_IP}/${VM_CIDR}${NC}"
 echo -e "  Gateway:  ${BOLD}${VM_GW}${NC}"
 echo -e "  Bridge:   ${BOLD}${VM_BRIDGE}${NC}"
+echo -e "  VLAN:     ${BOLD}${VM_VLAN:-kein Tag}${NC}"
 echo -e "  MAC:      ${BOLD}${VM_MAC:-automatisch}${NC}"
 echo ""
 read -rp "VM erstellen? [j/N]: " confirm
@@ -159,6 +166,7 @@ fi
 # Netzwerk-Interface mit optionaler MAC
 NET0_CONFIG="virtio,bridge=${VM_BRIDGE}"
 [[ -n "$VM_MAC" ]] && NET0_CONFIG="virtio=${VM_MAC},bridge=${VM_BRIDGE}"
+[[ -n "${VM_VLAN:-}" ]] && NET0_CONFIG="${NET0_CONFIG},tag=${VM_VLAN}"
 qm set "$VM_ID" --net0 "$NET0_CONFIG"
 
 # Cloud-init

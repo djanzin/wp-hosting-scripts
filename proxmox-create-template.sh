@@ -131,6 +131,14 @@ qm set "$TEMPLATE_ID" \
     --ipconfig0 "ip=dhcp"
 
 # Vendor-Daten: SSH-Passwort-Login aktivieren (läuft zusätzlich zu Proxmox-User-Daten)
+# 'snippets' auf Storage 'local' sicherstellen — ein frisches PVE hat den Content-Type nicht,
+# --cicustom vendor=local:snippets/... schlägt dann fehl.
+if ! pvesm status --content snippets 2>/dev/null | awk 'NR>1{print $1}' | grep -qx local; then
+    info "Storage 'local' unterstützt noch keine Snippets — wird ergänzt."
+    LOCAL_CONTENT=$(awk '/^dir: local$/{f=1;next} f&&/^[[:space:]]+content[[:space:]]/{sub(/^[[:space:]]+content[[:space:]]+/,"");print;exit} f&&/^[^[:space:]]/{exit}' /etc/pve/storage.cfg)
+    pvesm set local --content "${LOCAL_CONTENT:+${LOCAL_CONTENT},}snippets"
+    log "Snippets auf 'local' aktiviert (${LOCAL_CONTENT:-leer} + snippets)"
+fi
 mkdir -p /var/lib/vz/snippets
 cat > /var/lib/vz/snippets/vm-vendor.yaml <<'EOF'
 #cloud-config

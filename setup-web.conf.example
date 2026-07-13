@@ -3,6 +3,10 @@
 #
 # Gesetzte Werte werden NICHT mehr abgefragt. Leere/fehlende Pflichtfelder
 # brechen mit klarer Fehlermeldung ab. Datei mit `chmod 600` schützen (enthält Secrets).
+#
+# Die Datei wird per `source` eingelesen (Bash-Syntax). Werte mit Leerzeichen oder
+# Sonderzeichen (z.B. SSH_PUB_KEY, WEBHOOK_URL mit Query-Params) MÜSSEN in doppelte
+# Anführungszeichen: VAR="wert mit leerzeichen".
 
 # ── VM-Typ (Pflicht): wordpress | woocommerce | mainwp ──
 VM_TYPE=woocommerce
@@ -57,5 +61,6 @@ THEME_BUCKET=wp-themes
 # ── age-Backup-Verschlüsselung: true | false ──
 ENABLE_AGE=false
 
-# ── SSH Public Key für ubuntu-User (optional) ──
+# ── SSH Public Key für ubuntu-User (optional; wegen Leerzeichen IMMER quoten) ──
+# Beispiel: SSH_PUB_KEY="ssh-ed25519 AAAA... user@host"
 SSH_PUB_KEY=
