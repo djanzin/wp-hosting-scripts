@@ -49,7 +49,7 @@ while [[ -z "$RCLONE_REMOTE" ]]; do
             [[ -z "$R2_ACCOUNT_ID" || -z "$R2_KEY_ID" || -z "$R2_KEY_SECRET" || -z "$R2_BUCKET" ]] && \
                 { warn "Alle R2-Felder sind Pflicht — bitte erneut eingeben."; continue; }
             RCLONE_REMOTE="r2"
-            RCLONE_DEST="r2:${R2_BUCKET}/mysql-backups-${DB_HOSTNAME}"
+            RCLONE_DEST="r2:${R2_BUCKET}/${DB_HOSTNAME}"
             ;;
         2)
             read -rp "S3 Region (z.B. eu-central-1): " S3_REGION
@@ -60,7 +60,7 @@ while [[ -z "$RCLONE_REMOTE" ]]; do
             [[ -z "$S3_BUCKET" || -z "$S3_KEY_ID" || -z "$S3_KEY_SECRET" ]] && \
                 { warn "Bucket, Key-ID und Secret sind Pflicht — bitte erneut eingeben."; continue; }
             RCLONE_REMOTE="s3backup"
-            RCLONE_DEST="s3backup:${S3_BUCKET}/mysql-backups-${DB_HOSTNAME}"
+            RCLONE_DEST="s3backup:${S3_BUCKET}/${DB_HOSTNAME}"
             ;;
         3)
             read -rp "SFTP Host: " SFTP_HOST
@@ -70,7 +70,7 @@ while [[ -z "$RCLONE_REMOTE" ]]; do
             [[ -z "$SFTP_HOST" || -z "$SFTP_USER" || -z "$SFTP_PATH" ]] && \
                 { warn "Host, User und Pfad sind Pflicht — bitte erneut eingeben."; continue; }
             RCLONE_REMOTE="sftpbackup"
-            RCLONE_DEST="sftpbackup:${SFTP_PATH}/mysql-backups-${DB_HOSTNAME}"
+            RCLONE_DEST="sftpbackup:${SFTP_PATH}/${DB_HOSTNAME}"
             ;;
         *) warn "Ungültig — Remote-Backup ist Pflicht. Bitte 1, 2 oder 3 wählen." ;;
     esac

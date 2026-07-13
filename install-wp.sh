@@ -21,6 +21,7 @@ CLI_TYPE=""
 CLI_ADMIN_IP=""
 CLI_SHOP_NAME=""
 CLI_MATOMO_SITE_ID=""
+CLI_NO_MATOMO=false
 i=0
 ARGS=("$@")
 while [[ $i -lt ${#ARGS[@]} ]]; do
@@ -32,6 +33,7 @@ while [[ $i -lt ${#ARGS[@]} ]]; do
         --admin-ip)       i=$((i+1)); CLI_ADMIN_IP="${ARGS[$i]}" ;;
         --shop-name)      i=$((i+1)); CLI_SHOP_NAME="${ARGS[$i]}" ;;
         --matomo-site-id) i=$((i+1)); CLI_MATOMO_SITE_ID="${ARGS[$i]}" ;;
+        --no-matomo)      CLI_NO_MATOMO=true ;;
         -h|--help)
             cat <<HELP
 Usage: install-wp.sh [Optionen]
@@ -48,8 +50,11 @@ Optionen:
   --type <wp|woo>         'wordpress' oder 'woocommerce'
   --admin-ip <ip>         WP-Admin-Zugang auf IP beschränken
   --shop-name <name>      Shop-Name (nur bei WooCommerce)
-  --matomo-site-id <n>    Matomo Site-ID → SEOpress-Matomo-Tracking aktivieren
-                          (Matomo-Host aus /etc/wp-hosting/config MATOMO_URL)
+  --matomo-site-id <n>    Matomo Site-ID manuell setzen → SEOpress-Matomo-Tracking
+                          (Matomo-Host aus /etc/wp-hosting/config MATOMO_URL). Ohne
+                          diese Option wird die Site automatisch per Matomo-API
+                          angelegt, sofern MATOMO_URL + MATOMO_TOKEN gesetzt sind.
+  --no-matomo             Automatische Matomo-Site-Anlage unterdrücken
   --yes                   Bestätigungs-Prompts überspringen
   --resume                Reste einer abgebrochenen Installation entfernen
 HELP
@@ -863,12 +868,12 @@ if [[ "$SITE_TYPE" == "mainwp" ]]; then
     log "Nginx Helper installiert (Purge deaktiviert — kein FastCGI-Cache)"
 
     # MainWP Dashboard Plugin aus wp-plugins-Bucket
-    if [[ -f "${PLUGINS_DIR}/mainwp-dashboard.zip" ]]; then
-        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/mainwp-dashboard.zip" \
+    if [[ -f "${PLUGINS_DIR}/mainwp.zip" ]]; then
+        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/mainwp.zip" \
             --activate --path="$SITE_PATH" --allow-root
         log "MainWP Dashboard installiert"
     else
-        warn "MainWP Dashboard ZIP fehlt: ${PLUGINS_DIR}/mainwp-dashboard.zip — sync-plugins.sh ausführen"
+        warn "MainWP Dashboard ZIP fehlt: ${PLUGINS_DIR}/mainwp.zip — sync-plugins.sh ausführen"
     fi
 
     # Dashboard verwaltet sich nicht selbst als Child — MAINWP_SECURITY_ID bleibt leer
@@ -921,16 +926,59 @@ else
     log "SEOpress installiert (Pro ZIP nicht gefunden → /etc/wp-hosting/plugins/seopress-pro.zip)"
 fi
 
-# ── Matomo-Tracking via SEOpress (optional, --matomo-site-id) ─────────────
+# ── Matomo-Tracking via SEOpress ──────────────────────────────────────────
+# Site-ID-Quelle: explizit via --matomo-site-id (Vorrang), sonst automatische Anlage
+# über die Matomo-API (SitesManager), wenn MATOMO_URL + MATOMO_TOKEN in der Config
+# stehen und --no-matomo NICHT gesetzt ist. MainWP-VMs sind ausgenommen (kein Tracking).
 # Setzt die Matomo-Keys in der serialisierten Option seopress_google_analytics_option_name.
 # Keys/Format 1:1 aus SEOpress-Source: matomo_id = Host OHNE https:// und ohne Slash.
 # cookieless (no_cookies) + dnt = an → consent-frei (TTDSG/DSGVO). Merge statt Overwrite,
 # damit andere Analytics-Settings erhalten bleiben.
-if [[ -n "$CLI_MATOMO_SITE_ID" ]]; then
+
+# Ermittelt die Matomo-Site-ID für eine URL: erst Dedup (getSitesIdFromSiteUrl),
+# sonst Neuanlage (addSite). Gibt die idSite auf stdout aus (leer bei Fehler).
+# Der Token wird per stdin (token_auth@-) übergeben, nie als CLI-Argument → kein
+# Leak in Prozessliste/Logs. Nur POST (kompatibel mit "Nur sichere Anfragen").
+matomo_ensure_site() {
+    local url="$1" name="$2" host api id
+    host="${MATOMO_URL#https://}"; host="${host#http://}"; host="${host%%/}"
+    api="https://${host}/index.php"
+    id=$(printf '%s' "$MATOMO_TOKEN" | curl -s -m 20 \
+        --data-urlencode 'module=API' \
+        --data-urlencode 'method=SitesManager.getSitesIdFromSiteUrl' \
+        --data-urlencode "url=${url}" \
+        --data-urlencode 'format=json' \
+        --data-urlencode 'token_auth@-' \
+        "$api" 2>/dev/null | grep -oE '"idsite" *: *"?[0-9]+' | grep -oE '[0-9]+' | head -1)
+    if [[ -n "$id" ]]; then printf '%s' "$id"; return 0; fi
+    id=$(printf '%s' "$MATOMO_TOKEN" | curl -s -m 20 \
+        --data-urlencode 'module=API' \
+        --data-urlencode 'method=SitesManager.addSite' \
+        --data-urlencode "siteName=${name}" \
+        --data-urlencode "urls[0]=${url}" \
+        --data-urlencode 'format=json' \
+        --data-urlencode 'token_auth@-' \
+        "$api" 2>/dev/null | grep -oE '"value" *: *[0-9]+' | grep -oE '[0-9]+' | head -1)
+    printf '%s' "$id"
+}
+
+MATOMO_SITE_ID="$CLI_MATOMO_SITE_ID"
+if [[ -z "$MATOMO_SITE_ID" && "$CLI_NO_MATOMO" == false && "$SITE_TYPE" != "mainwp" \
+      && -n "${MATOMO_URL:-}" && -n "${MATOMO_TOKEN:-}" ]]; then
+    info "Matomo: Site wird automatisch angelegt/ermittelt (${DOMAIN})…"
+    MATOMO_SITE_ID="$(matomo_ensure_site "https://${DOMAIN}" "${WOO_SHOP_NAME:-$DOMAIN}")"
+    if [[ -z "$MATOMO_SITE_ID" ]]; then
+        warn "Matomo-Auto-Anlage fehlgeschlagen (API nicht erreichbar, Token ungültig oder kein Super-User?) — Tracking übersprungen."
+    else
+        log "Matomo-Site angelegt/gefunden, Site-ID ${MATOMO_SITE_ID}"
+    fi
+fi
+
+if [[ -n "$MATOMO_SITE_ID" ]]; then
     if [[ -z "${MATOMO_URL:-}" ]]; then
         warn "Matomo Site-ID gesetzt, aber MATOMO_URL fehlt in /etc/wp-hosting/config — Matomo-Tracking übersprungen."
-    elif [[ ! "$CLI_MATOMO_SITE_ID" =~ ^[0-9]+$ ]]; then
-        warn "Ungültige Matomo Site-ID '${CLI_MATOMO_SITE_ID}' (nur Zahlen) — übersprungen."
+    elif [[ ! "$MATOMO_SITE_ID" =~ ^[0-9]+$ ]]; then
+        warn "Ungültige Matomo Site-ID '${MATOMO_SITE_ID}' (nur Zahlen) — übersprungen."
     else
         # Host defensiv normalisieren (falls in Config doch mit Schema/Slash)
         MATOMO_HOST="${MATOMO_URL#https://}"; MATOMO_HOST="${MATOMO_HOST#http://}"; MATOMO_HOST="${MATOMO_HOST%%/}"
@@ -940,14 +988,14 @@ if [[ -n "$CLI_MATOMO_SITE_ID" ]]; then
             \$o['seopress_google_analytics_matomo_enable']      = '1';
             \$o['seopress_google_analytics_matomo_self_hosted'] = '1';
             \$o['seopress_google_analytics_matomo_id']          = '${MATOMO_HOST}';
-            \$o['seopress_google_analytics_matomo_site_id']     = '${CLI_MATOMO_SITE_ID}';
+            \$o['seopress_google_analytics_matomo_site_id']     = '${MATOMO_SITE_ID}';
             \$o['seopress_google_analytics_matomo_no_cookies']  = '1';
             \$o['seopress_google_analytics_matomo_dnt']         = '1';
             \$o['seopress_google_analytics_matomo_link_tracking'] = '1';
             update_option('seopress_google_analytics_option_name', \$o);
             echo 'ok';
         " --path="$SITE_PATH" --allow-root >/dev/null 2>&1 \
-            && log "Matomo-Tracking aktiviert (SEOpress → ${MATOMO_HOST}, Site-ID ${CLI_MATOMO_SITE_ID}, cookieless)" \
+            && log "Matomo-Tracking aktiviert (SEOpress → ${MATOMO_HOST}, Site-ID ${MATOMO_SITE_ID}, cookieless)" \
             || warn "Matomo-Tracking konnte nicht gesetzt werden (wp eval fehlgeschlagen)."
     fi
 fi

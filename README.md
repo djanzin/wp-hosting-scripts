@@ -229,7 +229,7 @@ sudo bash install-wp.sh --domain mainwp.example.com --type mainwp --yes
 
 ### Plugin-ZIPs im wp-plugins-Bucket
 
-- `mainwp-dashboard.zip` — wird auf der mainwp-VM auto-installiert
+- `mainwp.zip` — wird auf der mainwp-VM auto-installiert
 - `mainwp-child.zip` — auf jeder normalen WP-/Woo-Site auto-installiert (Standard)
 
 Nach Upload neuer ZIP-Versionen: `sudo bash sync-plugins.sh --plugins`
@@ -412,13 +412,15 @@ Webhook-Format: **Uptime Kuma Push Monitor** (`GET ?status=up|down&msg=…`).
 - **Manuelle Backups (`db-backup.sh`)** verwenden denselben Code-Pfad: Encryption + Remote-Mirror identisch zum Auto-Cron, `flock`-Lock auf `/var/lock/mysql-backup.lock` verhindert parallele Läufe
 
 ### Bucket-Layout
-Empfohlen: **3 Buckets** in derselben R2/S3-Storage:
+Empfohlen: **4 Buckets** in derselben R2/S3-Storage:
 
 ```
-r2:wp-backups/                          ← Backup-Bucket (7-Tage-Mirror)
-├── wp-files-<web-vm-1-hostname>/
-├── wp-files-<web-vm-2-hostname>/
-└── mysql-backups-<db-vm-hostname>/
+r2:wp-backups/                          ← Web-Datei-Backups (7-Tage-Mirror)
+├── <web-vm-1-hostname>/
+└── <web-vm-2-hostname>/
+
+r2:db-backups/                          ← Datenbank-Backups (7-Tage-Mirror)
+└── <db-vm-hostname>/
 
 r2:wp-plugins/                          ← private/Pro-Plugin-ZIPs
 ├── blocksy-companion-pro.zip
@@ -426,7 +428,7 @@ r2:wp-plugins/                          ← private/Pro-Plugin-ZIPs
 ├── funnelkit-automations-pro.zip       ← E-Mail-Marketing (Woo)
 ├── pixel-manager-pro.zip               ← alle Ad-Pixel + Server-Side CAPI (Woo)
 ├── mainwp-child.zip                    ← MainWP Child (auf JEDER Site auto-installiert)
-├── mainwp-dashboard.zip                ← MainWP Dashboard (nur auf mainwp-VM auto-installiert)
+├── mainwp.zip                ← MainWP Dashboard (nur auf mainwp-VM auto-installiert)
 ├── postxpro.zip                        ← Tech-Blog-Blocks
 ├── seopress-pro.zip
 ├── wowinvoice-pro.zip                  ← PDF-Rechnungen (Woo, Premium-only)
@@ -438,7 +440,7 @@ r2:wp-themes/                           ← private/Pro-Theme-ZIPs
 └── blocksy-child.zip                   ← Child-Theme (für Anpassungen)
 ```
 
-**Warum 3 Buckets:** Backups haben kurze Retention (7-Tage-Mirror), Plugin/Theme-ZIPs
+**Warum 4 Buckets:** Backups haben kurze Retention (7-Tage-Mirror), Plugin/Theme-ZIPs
 haben dauerhafte Aufbewahrung. Trennung erleichtert Lifecycle-Rules und
 verhindert versehentliches Löschen durch Backup-Sync.
 

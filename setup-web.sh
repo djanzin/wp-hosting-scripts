@@ -133,10 +133,15 @@ fi
 WEBHOOK_URL="${WEBHOOK_URL:-}";  $NONINT || read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
 SEOPRESS_KEY="${SEOPRESS_KEY:-}"; $NONINT || { read -rsp "SEOpress Pro Lizenz-Key (leer = überspringen): " SEOPRESS_KEY; echo ""; }
 # Zentrale Matomo-Instanz (Host ohne https:// und ohne Slash, z.B. analytics.example.com).
-# Wird bei install-wp.sh --matomo-site-id genutzt, um SEOpress-Matomo-Tracking zu setzen.
+# Genutzt von install-wp.sh für SEOpress-Matomo-Tracking: Site-ID manuell via
+# --matomo-site-id ODER automatisch per Matomo-API (dann ist MATOMO_TOKEN nötig).
 MATOMO_URL="${MATOMO_URL:-}"; $NONINT || read -rp "Matomo-Host (z.B. analytics.example.com, leer = überspringen): " MATOMO_URL
 # Defensiv: evtl. mitkopiertes Schema/Slash entfernen
 MATOMO_URL="${MATOMO_URL#https://}"; MATOMO_URL="${MATOMO_URL#http://}"; MATOMO_URL="${MATOMO_URL%%/}"
+# Matomo Auth-Token (Super-User) für die automatische Site-Anlage über die API.
+# Nur mit MATOMO_URL sinnvoll; landet in /etc/wp-hosting/config (chmod 600).
+MATOMO_TOKEN="${MATOMO_TOKEN:-}"
+if [[ -n "$MATOMO_URL" ]]; then $NONINT || { read -rsp "Matomo Auth-Token (Super-User, für Auto-Site-Anlage; leer = überspringen): " MATOMO_TOKEN; echo ""; }; fi
 
 echo ""
 echo -e "${BOLD}Remote-Backup für WordPress-Dateien (wp-content) — PFLICHT${NC}"
@@ -158,21 +163,21 @@ if [[ -n "$RCLONE_REMOTE" ]]; then
             [[ -z "${R2_ACCOUNT_ID:-}" || -z "${R2_KEY_ID:-}" || -z "${R2_KEY_SECRET:-}" || -z "${R2_BUCKET:-}" ]] && \
                 err "R2-Config unvollständig (R2_ACCOUNT_ID/R2_KEY_ID/R2_KEY_SECRET/R2_BUCKET)."
             RCLONE_CHOICE=1
-            RCLONE_DEST="r2:${R2_BUCKET}/wp-files-${WEB_HOSTNAME}"
+            RCLONE_DEST="r2:${R2_BUCKET}/${WEB_HOSTNAME}"
             ;;
         s3backup)
             [[ -z "${S3_BUCKET:-}" || -z "${S3_KEY_ID:-}" || -z "${S3_KEY_SECRET:-}" ]] && \
                 err "S3-Config unvollständig (S3_BUCKET/S3_KEY_ID/S3_KEY_SECRET)."
             S3_REGION="${S3_REGION:-}"; S3_ENDPOINT="${S3_ENDPOINT:-}"
             RCLONE_CHOICE=2
-            RCLONE_DEST="s3backup:${S3_BUCKET}/wp-files-${WEB_HOSTNAME}"
+            RCLONE_DEST="s3backup:${S3_BUCKET}/${WEB_HOSTNAME}"
             ;;
         sftpbackup)
             [[ -z "${SFTP_HOST:-}" || -z "${SFTP_USER:-}" || -z "${SFTP_PATH:-}" ]] && \
                 err "SFTP-Config unvollständig (SFTP_HOST/SFTP_USER/SFTP_PATH)."
             SFTP_PORT="${SFTP_PORT:-22}"
             RCLONE_CHOICE=3
-            RCLONE_DEST="sftpbackup:${SFTP_PATH}/wp-files-${WEB_HOSTNAME}"
+            RCLONE_DEST="sftpbackup:${SFTP_PATH}/${WEB_HOSTNAME}"
             ;;
         *) err "Ungültiger RCLONE_REMOTE: ${RCLONE_REMOTE} (erlaubt: r2, s3backup, sftpbackup)." ;;
     esac
@@ -188,7 +193,7 @@ else
                 [[ -z "$R2_ACCOUNT_ID" || -z "$R2_KEY_ID" || -z "$R2_KEY_SECRET" || -z "$R2_BUCKET" ]] && \
                     { warn "Alle R2-Felder sind Pflicht — bitte erneut eingeben."; continue; }
                 RCLONE_REMOTE="r2"
-                RCLONE_DEST="r2:${R2_BUCKET}/wp-files-${WEB_HOSTNAME}"
+                RCLONE_DEST="r2:${R2_BUCKET}/${WEB_HOSTNAME}"
                 ;;
             2)
                 read -rp "S3 Region (z.B. eu-central-1): " S3_REGION
@@ -199,7 +204,7 @@ else
                 [[ -z "$S3_BUCKET" || -z "$S3_KEY_ID" || -z "$S3_KEY_SECRET" ]] && \
                     { warn "Bucket, Key-ID und Secret sind Pflicht — bitte erneut eingeben."; continue; }
                 RCLONE_REMOTE="s3backup"
-                RCLONE_DEST="s3backup:${S3_BUCKET}/wp-files-${WEB_HOSTNAME}"
+                RCLONE_DEST="s3backup:${S3_BUCKET}/${WEB_HOSTNAME}"
                 ;;
             3)
                 read -rp "SFTP Host: " SFTP_HOST
@@ -209,7 +214,7 @@ else
                 [[ -z "$SFTP_HOST" || -z "$SFTP_USER" || -z "$SFTP_PATH" ]] && \
                     { warn "Host, User und Pfad sind Pflicht — bitte erneut eingeben."; continue; }
                 RCLONE_REMOTE="sftpbackup"
-                RCLONE_DEST="sftpbackup:${SFTP_PATH}/wp-files-${WEB_HOSTNAME}"
+                RCLONE_DEST="sftpbackup:${SFTP_PATH}/${WEB_HOSTNAME}"
                 ;;
             *) warn "Ungültig — Remote-Backup ist Pflicht. Bitte 1, 2 oder 3 wählen." ;;
         esac
@@ -1230,6 +1235,7 @@ PLUGIN_BUCKET=${PLUGIN_BUCKET:-}
 THEME_BUCKET=${THEME_BUCKET:-}
 SEOPRESS_KEY=${SEOPRESS_KEY:-}
 MATOMO_URL=${MATOMO_URL:-}
+MATOMO_TOKEN=${MATOMO_TOKEN:-}
 PMA_AUTH_PASS=${PMA_AUTH_PASS}
 EOF
 chmod 600 /etc/wp-hosting/config
