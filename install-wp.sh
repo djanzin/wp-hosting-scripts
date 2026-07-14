@@ -85,6 +85,10 @@ DOMAIN=$(echo "$DOMAIN" | tr '[:upper:]' '[:lower:]' | sed 's/^www\.//')
 [[ -z "$DOMAIN" ]] && err "Domain darf nicht leer sein."
 [[ ! "$DOMAIN" =~ ^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$ ]] && err "Ungültige Domain: ${DOMAIN}"
 
+# Admin-E-Mail nach festem Schema aus der Domain ableiten: admin_dany@<domain>.
+# Überschreibt bewusst einen etwaigen Wert aus /etc/wp-hosting/config.
+WP_ADMIN_EMAIL="admin_dany@${DOMAIN}"
+
 if [[ -n "$CLI_TYPE" ]]; then
     case "$CLI_TYPE" in
         wp|wordpress)         SITE_TYPE="wordpress" ;;

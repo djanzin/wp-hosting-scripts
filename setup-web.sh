@@ -97,8 +97,9 @@ DB_ADMIN_USER="${DB_ADMIN_USER:-}"; ask DB_ADMIN_USER  "DB-Admin-Benutzer (von s
 DB_ADMIN_PASS="${DB_ADMIN_PASS:-}"; ask_secret DB_ADMIN_PASS "DB-Admin-Passwort (von setup-db.sh ausgegeben): "
 [[ -z "$DB_ADMIN_PASS" ]] && err "DB-Admin-Passwort darf nicht leer sein (Config: DB_ADMIN_PASS)."
 
-WP_ADMIN_EMAIL="${WP_ADMIN_EMAIL:-}"; ask WP_ADMIN_EMAIL "Standard-Admin-E-Mail für WordPress-Sites: "
-[[ -z "$WP_ADMIN_EMAIL" ]] && err "E-Mail darf nicht leer sein (Config: WP_ADMIN_EMAIL)."
+# Admin-E-Mail wird von install-wp.sh pro Site aus der Domain abgeleitet
+# (admin_dany@<domain>). Dieses Feld ist daher optional (Alt-Wert, ungenutzt).
+WP_ADMIN_EMAIL="${WP_ADMIN_EMAIL:-}"; ask WP_ADMIN_EMAIL "Standard-Admin-E-Mail (optional, wird pro Site abgeleitet): "
 
 # NPM-IP: aus Config (NPM_IP) übernehmen, sonst Auto-Detection + Prompt.
 # Auto-Detection: erste IP im selben /24, die :81 (NPM-Admin) öffnet (Bash /dev/tcp).
