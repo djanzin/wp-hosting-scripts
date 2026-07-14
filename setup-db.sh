@@ -12,7 +12,9 @@ info() { echo -e "${BLUE}[i]${NC} $1"; }
 
 [[ $EUID -ne 0 ]] && err "Als root ausführen: sudo bash setup-db.sh"
 
-clear
+# clear scheitert ohne TERM (z.B. non-interaktiv über SSH) und würde mit set -e
+# das ganze Skript killen → non-fatal machen.
+clear 2>/dev/null || true
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════╗"
 echo "║   Datenbank-VM Setup — Ubuntu 24.04          ║"

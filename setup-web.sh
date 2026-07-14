@@ -58,7 +58,9 @@ confirm_or_die() {
     [[ "$ans" != "j" && "$ans" != "J" ]] && err "Abgebrochen."
 }
 
-clear
+# clear scheitert ohne TERM (z.B. non-interaktiv über SSH) und würde mit set -e
+# das ganze Skript killen → non-fatal machen.
+clear 2>/dev/null || true
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════╗"
 echo "║   WordPress Web-VM Setup — Ubuntu 24.04      ║"

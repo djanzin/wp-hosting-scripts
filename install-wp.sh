@@ -66,7 +66,9 @@ done
 # ── Konfiguration laden ────────────────────────────────────────────────────
 source /etc/wp-hosting/config
 
-clear
+# clear scheitert ohne TERM (z.B. non-interaktiv über SSH) und würde mit set -e
+# das ganze Skript killen → non-fatal machen.
+clear 2>/dev/null || true
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════╗"
 echo "║   WordPress Site Installer                   ║"
