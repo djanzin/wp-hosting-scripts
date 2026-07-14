@@ -1080,16 +1080,19 @@ fi
 # Nur wordpress/woocommerce (dieser else-Zweig) — NICHT auf der mainwp-Dashboard-VM.
 # Security ID schützt vor Hijack durch fremde Dashboards.
 MAINWP_SECURITY_ID=""
+# Child aus lokalem Zip (Plugin-Bucket) bevorzugen, sonst aus dem wp.org-Repo — immer installieren.
 if [[ -f "${PLUGINS_DIR}/mainwp-child.zip" ]]; then
     sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/mainwp-child.zip" \
         --activate --path="$SITE_PATH" --allow-root
-
-    # 16 Hex-Zeichen als Unique Security ID — wird beim Connect im Dashboard verlangt
-    MAINWP_SECURITY_ID=$(openssl rand -hex 8)
-    sudo -u "$SYSTEM_USER" wp option update mainwp_child_uniqueId "$MAINWP_SECURITY_ID" \
-        --path="$SITE_PATH" --allow-root
-    log "MainWP Child installiert (Security ID: ${MAINWP_SECURITY_ID})"
+else
+    sudo -u "$SYSTEM_USER" wp plugin install mainwp-child --activate --path="$SITE_PATH" --allow-root
 fi
+
+# 16 Hex-Zeichen als Unique Security ID — wird beim Connect im Dashboard verlangt
+MAINWP_SECURITY_ID=$(openssl rand -hex 8)
+sudo -u "$SYSTEM_USER" wp option update mainwp_child_uniqueId "$MAINWP_SECURITY_ID" \
+    --path="$SITE_PATH" --allow-root
+log "MainWP Child installiert (Security ID: ${MAINWP_SECURITY_ID})"
 fi  # ── Ende: Standard-Stack (wordpress/woocommerce) vs. mainwp-Branch ──
 
 # ── Bloat entfernen ───────────────────────────────────────────────────────
