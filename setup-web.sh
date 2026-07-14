@@ -136,15 +136,11 @@ fi
 WEBHOOK_URL="${WEBHOOK_URL:-}";  $NONINT || read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
 SEOPRESS_KEY="${SEOPRESS_KEY:-}"; $NONINT || { read -rsp "SEOpress Pro Lizenz-Key (leer = überspringen): " SEOPRESS_KEY; echo ""; }
 # Zentrale Matomo-Instanz (Host ohne https:// und ohne Slash, z.B. analytics.example.com).
-# Genutzt von install-wp.sh für SEOpress-Matomo-Tracking: Site-ID manuell via
-# --matomo-site-id ODER automatisch per Matomo-API (dann ist MATOMO_TOKEN nötig).
+# Nur informativ in /etc/wp-hosting/config — Matomo-Site-Anlage + SEOpress-Tracking
+# laufen zentral über provision-endpoint.sh (der Matomo-Token bleibt dort, nicht auf der VM).
 MATOMO_URL="${MATOMO_URL:-}"; $NONINT || read -rp "Matomo-Host (z.B. analytics.example.com, leer = überspringen): " MATOMO_URL
 # Defensiv: evtl. mitkopiertes Schema/Slash entfernen
 MATOMO_URL="${MATOMO_URL#https://}"; MATOMO_URL="${MATOMO_URL#http://}"; MATOMO_URL="${MATOMO_URL%%/}"
-# Matomo Auth-Token (Super-User) für die automatische Site-Anlage über die API.
-# Nur mit MATOMO_URL sinnvoll; landet in /etc/wp-hosting/config (chmod 600).
-MATOMO_TOKEN="${MATOMO_TOKEN:-}"
-if [[ -n "$MATOMO_URL" ]]; then $NONINT || { read -rsp "Matomo Auth-Token (Super-User, für Auto-Site-Anlage; leer = überspringen): " MATOMO_TOKEN; echo ""; }; fi
 
 echo ""
 echo -e "${BOLD}Remote-Backup für WordPress-Dateien (wp-content) — PFLICHT${NC}"
@@ -1238,7 +1234,6 @@ PLUGIN_BUCKET=${PLUGIN_BUCKET:-}
 THEME_BUCKET=${THEME_BUCKET:-}
 SEOPRESS_KEY=${SEOPRESS_KEY:-}
 MATOMO_URL=${MATOMO_URL:-}
-MATOMO_TOKEN=${MATOMO_TOKEN:-}
 PMA_AUTH_PASS=${PMA_AUTH_PASS}
 EOF
 chmod 600 /etc/wp-hosting/config
