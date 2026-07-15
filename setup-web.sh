@@ -889,7 +889,9 @@ ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp
-ufw allow 80/tcp
+# HTTP nur vom Reverse-Proxy (Caddy) — Traffic kommt immer über Cloudflare→Caddy;
+# direkter :80-Zugriff würde CrowdSec/WAF umgehen.
+ufw allow from "$NPM_IP" to any port 80
 # phpMyAdmin + Filebrowser nur vom NPM erreichbar
 ufw allow from "$NPM_IP" to any port 8080
 ufw allow from "$NPM_IP" to any port 8090
@@ -899,7 +901,7 @@ if [[ -n "${NETDATA_PARENT_IP:-}" ]]; then
     ufw allow from "$NETDATA_PARENT_IP" to any port 19999
 fi
 ufw --force enable
-log "Firewall konfiguriert (22, 80 offen | 8080+8090 nur von NPM: ${NPM_IP}${NETDATA_PARENT_IP:+ | 19999 nur von ${NETDATA_PARENT_IP}})"
+log "Firewall konfiguriert (22 offen | 80+8080+8090 nur von NPM: ${NPM_IP}${NETDATA_PARENT_IP:+ | 19999 nur von ${NETDATA_PARENT_IP}})"
 
 # ── Verzeichnisstruktur ───────────────────────────────────────────────────
 mkdir -p /var/www
