@@ -1,0 +1,48 @@
+# setup-db.conf — Vorlage für non-interaktiven DB-VM-Aufbau
+# Aufruf:  sudo bash setup-db.sh --config setup-db.conf
+#
+# Gesetzte Werte werden NICHT mehr abgefragt. Leere/fehlende Pflichtfelder
+# brechen mit klarer Fehlermeldung ab. Datei mit `chmod 600` schützen (enthält Secrets).
+#
+# Die Datei wird per `source` eingelesen (Bash-Syntax). Werte mit Leerzeichen oder
+# Sonderzeichen (z.B. SSH_PUB_KEY) MÜSSEN in doppelte Anführungszeichen: VAR="…".
+
+# ── Web-VM-IPs, die auf die DB zugreifen dürfen (Pflicht, kommagetrennt) ──
+WEB_VM_IPS=192.168.1.10,192.168.1.11
+
+# ── Benachrichtigungen (optional) ──
+WEBHOOK_URL=https://uptime-kuma.example.com/api/push/DEIN_KEY
+
+# ── age Public-Key für Backup-Verschlüsselung (optional; muss mit age1 beginnen) ──
+AGE_RECIPIENT=
+
+# ── Remote-Backup (Pflicht): RCLONE_REMOTE = r2 | s3backup | sftpbackup ──
+RCLONE_REMOTE=r2
+
+# -- R2 (wenn RCLONE_REMOTE=r2) --
+R2_ACCOUNT_ID=CHANGE_ME
+R2_KEY_ID=CHANGE_ME
+R2_KEY_SECRET=CHANGE_ME
+R2_BUCKET=db-backups
+
+# -- S3 (wenn RCLONE_REMOTE=s3backup) --
+# S3_REGION=eu-central-1
+# S3_BUCKET=db-backups
+# S3_KEY_ID=CHANGE_ME
+# S3_KEY_SECRET=CHANGE_ME
+# S3_ENDPOINT=                # leer = AWS-Standard
+
+# -- SFTP (wenn RCLONE_REMOTE=sftpbackup) --
+# SFTP_HOST=backup.example.com
+# SFTP_USER=bkp
+# SFTP_PATH=/backups
+# SFTP_PORT=22                # SSH-Key /root/.ssh/id_rsa muss am Ziel hinterlegt sein
+
+# ── Monitoring (optional): IP des Netdata-Parents. Nur wenn gesetzt wird Port
+#    19999 in der Firewall für genau diese Quelle geöffnet (sonst bleibt 19999 zu). ──
+NETDATA_PARENT_IP=
+
+# ── SSH Public Key für ubuntu-User (optional; wegen Leerzeichen IMMER quoten) ──
+# Gesetzt → Passwort-Login wird global deaktiviert. Beispiel:
+# SSH_PUB_KEY="ssh-ed25519 AAAA... user@host"
+SSH_PUB_KEY=

@@ -121,8 +121,7 @@ if [[ -z "${NPM_IP:-}" ]]; then
         done
     fi
     if $NONINT; then
-        NPM_IP="127.0.0.1"
-        warn "NPM_IP nicht in Config — Fallback 127.0.0.1 (Real-IP ggf. nachpflegen)."
+        err "NPM_IP ist im --config-Modus Pflicht (IP des Reverse-Proxy/Caddy, z.B. 10.1.2.2) — sonst ist Real-IP kaputt und ufw sperrt den Proxy von phpMyAdmin/Filebrowser aus."
     elif [[ -n "$NPM_IP_GUESS" ]]; then
         read -rp "IP-Adresse des Nginx Proxy Managers (Vorschlag: ${NPM_IP_GUESS}): " NPM_IP
         [[ -z "$NPM_IP" ]] && NPM_IP="$NPM_IP_GUESS"
@@ -181,6 +180,7 @@ if [[ -n "$RCLONE_REMOTE" ]]; then
         *) err "Ungültiger RCLONE_REMOTE: ${RCLONE_REMOTE} (erlaubt: r2, s3backup, sftpbackup)." ;;
     esac
 else
+    $NONINT && err "RCLONE_REMOTE ist im --config-Modus Pflicht (r2 | s3backup | sftpbackup)."
     while [[ -z "$RCLONE_REMOTE" ]]; do
         read -rp "Auswahl [1-3]: " RCLONE_CHOICE
         case "$RCLONE_CHOICE" in
@@ -227,7 +227,16 @@ PLUGIN_BUCKET="${PLUGIN_BUCKET:-}"; $NONINT || read -rp "Bucket-Name für Plugin
 [[ -n "$PLUGIN_BUCKET" ]] && info "Plugin-Bucket: ${BOLD}${RCLONE_REMOTE}:${PLUGIN_BUCKET}${NC}"
 
 THEME_BUCKET="${THEME_BUCKET:-}";   $NONINT || read -rp "Bucket-Name für Theme-ZIPs (z.B. wp-themes, leer = überspringen): " THEME_BUCKET
-[[ -n "$THEME_BUCKET" ]] && info "Theme-Bucket:  ${BOLD}${RCLONE_REMOTE}:${THEME_BUCKET}${NC}"
+
+# R2-Layout ist fix — im Config-Modus ohne gesetzten Bucket auf wp-plugins/wp-themes
+# defaulten, statt den Pro-Plugin/Theme-Sync still zu überspringen (Live-Bug 2026-07).
+if [[ "$RCLONE_REMOTE" == "r2" ]]; then
+    [[ -z "$PLUGIN_BUCKET" ]] && { PLUGIN_BUCKET="wp-plugins"; info "PLUGIN_BUCKET nicht gesetzt → Default r2:wp-plugins"; }
+    [[ -z "$THEME_BUCKET"  ]] && { THEME_BUCKET="wp-themes";   info "THEME_BUCKET nicht gesetzt → Default r2:wp-themes"; }
+fi
+[[ -n "$THEME_BUCKET"  ]] && info "Theme-Bucket:  ${BOLD}${RCLONE_REMOTE}:${THEME_BUCKET}${NC}"
+[[ -z "$PLUGIN_BUCKET" ]] && warn "PLUGIN_BUCKET leer — Pro-Plugins werden NICHT synchronisiert."
+[[ -z "$THEME_BUCKET"  ]] && warn "THEME_BUCKET leer — Blocksy-Theme wird NICHT synchronisiert."
 
 # age-Verschlüsselung: Config-Variable ENABLE_AGE (true/false) oder interaktiv.
 if [[ -z "${ENABLE_AGE:-}" ]]; then
@@ -240,6 +249,9 @@ if [[ -z "${ENABLE_AGE:-}" ]]; then
         [[ "$ENABLE_AGE_CHOICE" == "j" || "$ENABLE_AGE_CHOICE" == "J" ]] && ENABLE_AGE=true
     fi
 fi
+# ENABLE_AGE strikt auf true/false normalisieren — sonst würde ein Config-Wert wie
+# "yes" bei `$ENABLE_AGE && …` als Kommando ausgeführt (Hänger).
+case "${ENABLE_AGE,,}" in true|1|yes|y|j) ENABLE_AGE=true ;; *) ENABLE_AGE=false ;; esac
 
 echo ""
 info "VM-Typ: ${BOLD}${VM_TYPE}${NC}"
@@ -272,8 +284,10 @@ if [[ -n "$RCLONE_REMOTE" ]]; then
     fi
 
     mkdir -p /root/.config/rclone
+    # rclone.conf frisch schreiben (nicht anhängen) — idempotent bei Re-Run,
+    # sonst doppelte [r2]/[s3backup]-Sektionen.
     case "$RCLONE_CHOICE" in
-        1) cat >> /root/.config/rclone/rclone.conf <<EOF
+        1) cat > /root/.config/rclone/rclone.conf <<EOF
 
 [r2]
 type = s3
@@ -284,7 +298,7 @@ endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
 acl = private
 EOF
             ;;
-        2) cat >> /root/.config/rclone/rclone.conf <<EOF
+        2) cat > /root/.config/rclone/rclone.conf <<EOF
 
 [s3backup]
 type = s3
@@ -296,7 +310,7 @@ ${S3_ENDPOINT:+endpoint = ${S3_ENDPOINT}}
 acl = private
 EOF
             ;;
-        3) cat >> /root/.config/rclone/rclone.conf <<EOF
+        3) cat > /root/.config/rclone/rclone.conf <<EOF
 
 [sftpbackup]
 type = sftp
@@ -380,7 +394,7 @@ else
 fi
 
 # ── WP-CLI ────────────────────────────────────────────────────────────────
-curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+curl -fsSL -o wp-cli.phar https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
 chmod +x wp-cli.phar
 mv wp-cli.phar /usr/local/bin/wp
 log "WP-CLI installiert"
@@ -412,8 +426,8 @@ sed -i "s/max_input_time = .*/max_input_time = ${MAX_EXEC}/" "$PHP_INI"
 sed -i "/max_input_vars/d" "$PHP_INI"
 echo "max_input_vars = ${MAX_INPUT_VARS}" >> "$PHP_INI"
 
-# OPcache
-cat >> "$PHP_INI" <<EOF
+# OPcache (idempotent — nur anhängen wenn noch nicht vorhanden)
+grep -q '^\[opcache\]' "$PHP_INI" || cat >> "$PHP_INI" <<EOF
 
 [opcache]
 opcache.enable=1
@@ -671,10 +685,15 @@ if command -v filebrowser &>/dev/null; then
 else
     info "Filebrowser wird installiert..."
     FB_VERSION=$(curl -s https://api.github.com/repos/filebrowser/filebrowser/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
-    wget -q "https://github.com/filebrowser/filebrowser/releases/download/v${FB_VERSION}/linux-amd64-filebrowser.tar.gz" -O /tmp/fb.tar.gz
-    tar -xzf /tmp/fb.tar.gz -C /usr/local/bin/ filebrowser
-    chmod +x /usr/local/bin/filebrowser
-    rm /tmp/fb.tar.gz
+    [[ -z "$FB_VERSION" ]] && { FB_VERSION="2.31.2"; warn "Filebrowser-Version via GitHub-API nicht ermittelbar — Fallback v${FB_VERSION}"; }
+    if wget -q "https://github.com/filebrowser/filebrowser/releases/download/v${FB_VERSION}/linux-amd64-filebrowser.tar.gz" -O /tmp/fb.tar.gz && [[ -s /tmp/fb.tar.gz ]]; then
+        tar -xzf /tmp/fb.tar.gz -C /usr/local/bin/ filebrowser
+        chmod +x /usr/local/bin/filebrowser
+        rm -f /tmp/fb.tar.gz
+    else
+        warn "Filebrowser-Download fehlgeschlagen (v${FB_VERSION}) — übersprungen (SFTP bleibt verfügbar)"
+        rm -f /tmp/fb.tar.gz
+    fi
 fi
 
 mkdir -p /etc/filebrowser
@@ -755,13 +774,6 @@ backend = polling
 # Cloudflare IPv4/IPv6 Ranges + localhost + Web-VM selbst
 ignoreip = 127.0.0.1/8 ::1 ${NPM_IP} ${CF_IGNOREIP}
 
-[nginx-req-limit]
-enabled  = true
-filter   = nginx-req-limit
-logpath  = /var/log/nginx/*.error.log
-maxretry = 10
-bantime  = 3600
-
 [nginx-wp-login]
 enabled  = true
 filter   = nginx-wp-login
@@ -798,11 +810,18 @@ log "Fail2ban konfiguriert (wp-login, xmlrpc, noscript Jails aktiv)"
 
 # ── SSH Hardening & SFTP ─────────────────────────────────────────────────
 SSH_CONFIG="/etc/ssh/sshd_config"
-sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'          "$SSH_CONFIG"
-sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/'                  "$SSH_CONFIG"
-sed -i 's/^#*LoginGraceTime.*/LoginGraceTime 20/'             "$SSH_CONFIG"
-sed -i 's/^#*X11Forwarding.*/X11Forwarding no/'               "$SSH_CONFIG"
-sed -i 's/^#*AllowTcpForwarding.*/AllowTcpForwarding no/'     "$SSH_CONFIG"
+# Globale Härtung per Drop-in — Ubuntu includet sshd_config.d/*.conf zuerst; ein
+# 01-* gewinnt per first-match-wins über 50-cloud-init.conf (PasswordAuthentication).
+SSHD_DROPIN="/etc/ssh/sshd_config.d/01-wp-hosting-hardening.conf"
+{
+    echo "PermitRootLogin no"
+    echo "MaxAuthTries 3"
+    echo "LoginGraceTime 20"
+    echo "X11Forwarding no"
+    echo "AllowTcpForwarding no"
+    echo "PubkeyAuthentication yes"
+} > "$SSHD_DROPIN"
+chmod 644 "$SSHD_DROPIN"
 
 # SFTP Subsystem auf internal-sftp umstellen (für Chroot)
 if grep -q "^Subsystem\s*sftp" "$SSH_CONFIG"; then
@@ -834,19 +853,25 @@ log "SFTP Chroot konfiguriert (/var/sftp)"
 
 echo ""
 SSH_PUB_KEY="${SSH_PUB_KEY:-}"; $NONINT || read -rp "SSH Public Key für ubuntu-User hinterlegen? (leer = überspringen): " SSH_PUB_KEY
-if [[ -n "$SSH_PUB_KEY" ]]; then
+if [[ -n "$SSH_PUB_KEY" ]] && id ubuntu &>/dev/null; then
     mkdir -p /home/ubuntu/.ssh
-    echo "$SSH_PUB_KEY" >> /home/ubuntu/.ssh/authorized_keys
+    grep -qF "$SSH_PUB_KEY" /home/ubuntu/.ssh/authorized_keys 2>/dev/null \
+        || echo "$SSH_PUB_KEY" >> /home/ubuntu/.ssh/authorized_keys
     chmod 700 /home/ubuntu/.ssh
     chmod 600 /home/ubuntu/.ssh/authorized_keys
-    chown -R ubuntu:ubuntu /home/ubuntu/.ssh 2>/dev/null || true
-    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' "$SSH_CONFIG"
-    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/'    "$SSH_CONFIG"
-    log "SSH Key hinterlegt — Passwort-Login deaktiviert"
+    chown -R ubuntu:ubuntu /home/ubuntu/.ssh
+    echo "PasswordAuthentication no" >> "$SSHD_DROPIN"
+    log "SSH Key hinterlegt — Passwort-Login global deaktiviert (SFTP-User behalten Passwort via Match-Block)"
+elif [[ -n "$SSH_PUB_KEY" ]]; then
+    warn "User 'ubuntu' fehlt — SSH-Key NICHT hinterlegt, Passwort-Login bleibt aktiv (kein Lockout)."
 else
     warn "Kein SSH Key — Passwort-Login bleibt aktiv"
 fi
-systemctl restart ssh
+if sshd -t 2>/dev/null; then
+    systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || warn "SSH-Neustart fehlgeschlagen"
+else
+    warn "sshd-Config-Test (sshd -t) fehlgeschlagen — SSH NICHT neu gestartet."
+fi
 
 # ── Netdata ───────────────────────────────────────────────────────────────
 if systemctl is-active --quiet netdata 2>/dev/null; then
@@ -868,9 +893,13 @@ ufw allow 80/tcp
 # phpMyAdmin + Filebrowser nur vom NPM erreichbar
 ufw allow from "$NPM_IP" to any port 8080
 ufw allow from "$NPM_IP" to any port 8090
-ufw allow 19999/tcp
+# Netdata streamt OUTBOUND zum Parent; inbound 19999 NICHT weltoffen öffnen.
+# Nur freigeben, wenn ein Monitoring-Parent gesetzt ist (NETDATA_PARENT_IP, optional).
+if [[ -n "${NETDATA_PARENT_IP:-}" ]]; then
+    ufw allow from "$NETDATA_PARENT_IP" to any port 19999
+fi
 ufw --force enable
-log "Firewall konfiguriert (22, 80 offen | 8080+8090 nur von NPM: ${NPM_IP} | 19999)"
+log "Firewall konfiguriert (22, 80 offen | 8080+8090 nur von NPM: ${NPM_IP}${NETDATA_PARENT_IP:+ | 19999 nur von ${NETDATA_PARENT_IP}})"
 
 # ── Verzeichnisstruktur ───────────────────────────────────────────────────
 mkdir -p /var/www
@@ -1242,8 +1271,8 @@ chmod 600 /etc/wp-hosting/config
 systemctl restart php8.3-fpm
 systemctl restart nginx
 systemctl restart redis-server
-systemctl restart fail2ban
-systemctl start filebrowser
+systemctl restart fail2ban || warn "fail2ban-Neustart fehlgeschlagen — mit 'fail2ban-client -t' prüfen"
+systemctl start filebrowser || warn "Filebrowser-Start fehlgeschlagen (evtl. nicht installiert) — übersprungen"
 log "Alle Services gestartet"
 
 # ── Zusammenfassung ───────────────────────────────────────────────────────

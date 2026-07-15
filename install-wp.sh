@@ -116,6 +116,13 @@ if [[ "$SITE_TYPE" == "mainwp" ]]; then
     fi
 fi
 
+# ── Sanity Check für WooCommerce-Type ─────────────────────────────────────
+# Woo auf einer Nicht-Woo-VM bekäme den WP-Vhost MIT FastCGI-Cache, aber OHNE
+# Cart/Checkout/Account-Bypass → kaputte/cross-customer Shop-Seiten. Deshalb hart ablehnen.
+if [[ "$SITE_TYPE" == "woocommerce" && "${VM_TYPE:-}" != "woocommerce" ]]; then
+    err "Diese VM ist nicht als WooCommerce-VM eingerichtet (VM_TYPE=${VM_TYPE:-unbekannt}). Erst setup-web.sh mit Option 2 (WooCommerce) ausführen — sonst fehlt der Cart/Checkout-Cache-Bypass."
+fi
+
 if [[ -n "$CLI_ADMIN_IP" ]]; then
     ADMIN_IP="$CLI_ADMIN_IP"
 elif ! $NON_INTERACTIVE; then
@@ -171,7 +178,7 @@ info "Pre-Flight-Check..."
 
 # DNS auflösbar?
 if command -v dig &>/dev/null; then
-    DNS_RESULT=$(dig +short +time=3 +tries=1 "$DOMAIN" 2>/dev/null | head -1)
+    DNS_RESULT=$(dig +short +time=3 +tries=1 "$DOMAIN" 2>/dev/null | head -1 || true)
     if [[ -z "$DNS_RESULT" ]]; then
         warn "  DNS: ${DOMAIN} ist nicht auflösbar (Cloudflare A-Record fehlt?)"
         $NON_INTERACTIVE || { read -rp "Trotzdem fortfahren? [j/N]: " ans; [[ "$ans" != "j" && "$ans" != "J" ]] && err "Abgebrochen."; }
@@ -215,7 +222,6 @@ if [[ -d "$SITE_PATH" || -f "$NGINX_VHOST" ]]; then
         sed -i "\|${SITE_PATH}.*${SFTP_CHROOT}/site|d" /etc/fstab 2>/dev/null || true
         rm -rf "$SFTP_CHROOT" "$SITE_PATH"
         id "wp_${DOMAIN_SAFE:0:20}" &>/dev/null && userdel "wp_${DOMAIN_SAFE:0:20}" 2>/dev/null || true
-        WEB_VM_IP_TMP=$(hostname -I | awk '{print $1}')
         mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" 2>/dev/null <<SQL || true
 DROP DATABASE IF EXISTS \`wp_${DOMAIN_SAFE}\`;
 SQL
@@ -822,7 +828,7 @@ sudo -u "$SYSTEM_USER" wp user update "$WP_ADMIN_USER" \
 # Kommentar-Einstellungen
 sudo -u "$SYSTEM_USER" wp option update require_name_email          "1"    --path="$SITE_PATH" --allow-root
 sudo -u "$SYSTEM_USER" wp option update comment_moderation          "0"    --path="$SITE_PATH" --allow-root
-sudo -u "$SYSTEM_USER" wp option update comment_whitelist           "1"    --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp option update comment_previously_approved "1"    --path="$SITE_PATH" --allow-root
 sudo -u "$SYSTEM_USER" wp option update close_comments_for_old_posts "1"  --path="$SITE_PATH" --allow-root
 sudo -u "$SYSTEM_USER" wp option update close_comments_days_old     "90"  --path="$SITE_PATH" --allow-root
 sudo -u "$SYSTEM_USER" wp option update default_comment_status      "open" --path="$SITE_PATH" --allow-root
@@ -845,20 +851,20 @@ if [[ "$SITE_TYPE" == "mainwp" ]]; then
     PLUGINS_DIR="/etc/wp-hosting/plugins"
 
     # Redis Object Cache
-    sudo -u "$SYSTEM_USER" wp plugin install redis-cache --activate --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp plugin install redis-cache --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
     sudo -u "$SYSTEM_USER" wp redis enable --path="$SITE_PATH" --allow-root 2>/dev/null || true
     log "Redis Object Cache aktiviert"
 
     # FluentSMTP — für MainWP-Notifications
-    sudo -u "$SYSTEM_USER" wp plugin install fluent-smtp --activate --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp plugin install fluent-smtp --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
     log "FluentSMTP installiert"
 
     # Two Factor — zusätzlich zur Authentik-Schicht
-    sudo -u "$SYSTEM_USER" wp plugin install two-factor --activate --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp plugin install two-factor --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
     log "Two Factor installiert (→ Profil → Two Factor Options → QR-Code scannen)"
 
     # Nginx Helper — Purge deaktiviert (kein FastCGI-Cache auf mainwp-Vhost)
-    sudo -u "$SYSTEM_USER" wp plugin install nginx-helper --activate --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp plugin install nginx-helper --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
     sudo -u "$SYSTEM_USER" wp option update rt_wp_nginx_helper_options \
         '{"enable_purge":"0"}' \
         --format=json --path="$SITE_PATH" --allow-root 2>/dev/null || true
@@ -867,7 +873,7 @@ if [[ "$SITE_TYPE" == "mainwp" ]]; then
     # MainWP Dashboard Plugin aus wp-plugins-Bucket
     if [[ -f "${PLUGINS_DIR}/mainwp.zip" ]]; then
         sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/mainwp.zip" \
-            --activate --path="$SITE_PATH" --allow-root
+            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
         log "MainWP Dashboard installiert"
     else
         warn "MainWP Dashboard ZIP fehlt: ${PLUGINS_DIR}/mainwp.zip — sync-plugins.sh ausführen"
@@ -886,38 +892,38 @@ if [[ -f "${THEMES_DIR}/blocksy.zip" ]]; then
 
     if [[ -f "${THEMES_DIR}/blocksy-child.zip" ]]; then
         sudo -u "$SYSTEM_USER" wp theme install "${THEMES_DIR}/blocksy-child.zip" --activate \
-            --path="$SITE_PATH" --allow-root
+            --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
         log "Blocksy + Child Theme installiert (Child aktiv → Anpassungen update-sicher)"
     else
         sudo -u "$SYSTEM_USER" wp theme activate blocksy --path="$SITE_PATH" --allow-root
         log "Blocksy Theme installiert und aktiviert"
     fi
 else
-    warn "Blocksy nicht gefunden (${THEMES_DIR}/blocksy.zip) — sync-assets.sh ausführen"
+    warn "Blocksy nicht gefunden (${THEMES_DIR}/blocksy.zip) — sync-plugins.sh --themes ausführen"
 fi
 
 # ── Redis Object Cache ─────────────────────────────────────────────────────
-sudo -u "$SYSTEM_USER" wp plugin install redis-cache --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp plugin install redis-cache --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 sudo -u "$SYSTEM_USER" wp redis enable --path="$SITE_PATH" --allow-root 2>/dev/null || true
 log "Redis Object Cache aktiviert"
 
 # ── FluentSMTP (E-Mail-Versand) ───────────────────────────────────────────
-sudo -u "$SYSTEM_USER" wp plugin install fluent-smtp --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp plugin install fluent-smtp --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 log "FluentSMTP installiert (→ SMTP-Zugangsdaten in WP-Admin → FluentSMTP eintragen)"
 
 # ── WebP Bildoptimierung ──────────────────────────────────────────────────
-sudo -u "$SYSTEM_USER" wp plugin install webp-converter-for-media --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp plugin install webp-converter-for-media --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 log "Converter for Media installiert (WebP-Konvertierung bei Upload)"
 
 # ── Two Factor (2FA für WP-Admin) ────────────────────────────────────────
-sudo -u "$SYSTEM_USER" wp plugin install two-factor --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp plugin install two-factor --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 log "Two Factor installiert (→ Profil → Two Factor Options → QR-Code scannen)"
 
 # ── SEOpress ──────────────────────────────────────────────────────────────
-sudo -u "$SYSTEM_USER" wp plugin install wp-seopress --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp plugin install wp-seopress --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 SEOPRESS_PRO_ZIP="/etc/wp-hosting/plugins/seopress-pro.zip"
 if [[ -f "$SEOPRESS_PRO_ZIP" ]]; then
-    sudo -u "$SYSTEM_USER" wp plugin install "$SEOPRESS_PRO_ZIP" --activate --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp plugin install "$SEOPRESS_PRO_ZIP" --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
     log "SEOpress + SEOpress Pro installiert"
 else
     log "SEOpress installiert (Pro ZIP nicht gefunden → /etc/wp-hosting/plugins/seopress-pro.zip)"
@@ -925,27 +931,27 @@ fi
 
 # ── FAZ Cookie Manager (DSGVO Cookie Consent) ────────────────────────────
 FAZ_URL=$(curl -s https://api.github.com/repos/fabiodalez-dev/FAZ-Cookie-Manager/releases/latest \
-    | grep "browser_download_url.*full\.zip" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+    | grep "browser_download_url.*full\.zip" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/' || true)
 if [[ -n "$FAZ_URL" ]]; then
-    sudo -u "$SYSTEM_USER" wp plugin install "$FAZ_URL" --activate --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp plugin install "$FAZ_URL" --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
     log "FAZ Cookie Manager installiert (→ Setup-Wizard in WP-Admin ausführen)"
 else
     warn "FAZ Cookie Manager: GitHub-URL nicht gefunden — manuell installieren"
 fi
 
 # ── Antispam Bee (Kommentar-Spam) ─────────────────────────────────────────
-sudo -u "$SYSTEM_USER" wp plugin install antispam-bee --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp plugin install antispam-bee --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 sudo -u "$SYSTEM_USER" wp option update antispam_bee \
     '{"regexp_check":1,"gravatar_check":1,"time_check":1,"country_code":"","flag_spam":0,"delete_spam":1,"spam_delete_days":7,"generate_css":0,"already_commented":0,"safe_number_chars":0,"no_comment_reason":0}' \
     --format=json --path="$SITE_PATH" --allow-root 2>/dev/null || true
 log "Antispam Bee aktiviert"
 
 # ── Cloudflare Turnstile (Fake-Anmeldungen / Bot-Schutz) ──────────────────
-sudo -u "$SYSTEM_USER" wp plugin install simple-cloudflare-turnstile --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp plugin install simple-cloudflare-turnstile --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 log "Cloudflare Turnstile installiert (→ Site Key + Secret Key in WP-Admin eintragen)"
 
 # ── Nginx Helper (FastCGI Cache-Invalidierung — für alle Site-Typen) ───────
-sudo -u "$SYSTEM_USER" wp plugin install nginx-helper --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp plugin install nginx-helper --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 sudo -u "$SYSTEM_USER" wp option update rt_wp_nginx_helper_options \
     '{"enable_purge":"1","cache_method":"enable_fastcgi","purge_method":"get_request","enable_map":null,"enable_log":null,"log_level":"INFO","log_filesize":"5","enable_stamp":null,"purge_homepage_on_edit":"1","purge_homepage_on_del":"1","purge_archive_on_edit":"1","purge_archive_on_del":"1","purge_archive_on_new_comment":"1","purge_archive_on_deleted_comment":"1","purge_page_on_mod":"1","purge_page_on_new_comment":"1","purge_page_on_deleted_comment":"1","nginx_server_ip":"127.0.0.1","purge_url":"","redis_hostname":"127.0.0.1","redis_port":"6379","redis_prefix":"nginx-cache:"}' \
     --format=json --path="$SITE_PATH" --allow-root 2>/dev/null || true
@@ -953,10 +959,10 @@ log "Nginx Helper (FastCGI Cache-Invalidierung) aktiviert"
 
 # ── Fluent Forms (Formulare — Free-Basis + Pro-Add-on) ─────────────────────
 # Pro ist ein Add-on und benötigt die Free-Basis aus dem WP-Repo darunter.
-sudo -u "$SYSTEM_USER" wp plugin install fluentform --activate --path="$SITE_PATH" --allow-root
+sudo -u "$SYSTEM_USER" wp plugin install fluentform --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 FLUENTFORM_PRO_ZIP="/etc/wp-hosting/plugins/fluentformpro.zip"
 if [[ -f "$FLUENTFORM_PRO_ZIP" ]]; then
-    sudo -u "$SYSTEM_USER" wp plugin install "$FLUENTFORM_PRO_ZIP" --activate --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp plugin install "$FLUENTFORM_PRO_ZIP" --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
     log "Fluent Forms + Fluent Forms Pro installiert"
 else
     log "Fluent Forms (Free) installiert — Pro-ZIP nicht gefunden (→ /etc/wp-hosting/plugins/fluentformpro.zip)"
@@ -965,7 +971,7 @@ fi
 # ── WooCommerce ────────────────────────────────────────────────────────────
 if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     info "WooCommerce wird installiert..."
-    sudo -u "$SYSTEM_USER" wp plugin install woocommerce --activate --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp plugin install woocommerce --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 
     # Deutsche Sprachdateien
     sudo -u "$SYSTEM_USER" wp language plugin install woocommerce en_US --path="$SITE_PATH" --allow-root 2>/dev/null || true
@@ -976,7 +982,7 @@ fi
 PLUGINS_DIR="/etc/wp-hosting/plugins"
 if [[ -f "${PLUGINS_DIR}/blocksy-companion-pro.zip" ]]; then
     sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/blocksy-companion-pro.zip" \
-        --activate --path="$SITE_PATH" --allow-root
+        --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
     log "Blocksy Companion Pro installiert (Theme-Builder, Header/Footer, Custom Post Types)"
 fi
 
@@ -985,7 +991,7 @@ if [[ "$SITE_TYPE" == "wordpress" ]]; then
     # PostX Pro — Tech-Blog-Blocks (Reviews, Comparison-Tables, Query Loops)
     if [[ -f "${PLUGINS_DIR}/postxpro.zip" ]]; then
         sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/postxpro.zip" \
-            --activate --path="$SITE_PATH" --allow-root
+            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
         log "PostX Pro installiert (Review-/Comparison-Blocks für Tech-Blogs)"
     fi
 fi
@@ -994,14 +1000,14 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     # WowStore Pro — Shop-Erweiterung (Quick-View, Filter, Wishlist, Produktgalerien)
     if [[ -f "${PLUGINS_DIR}/wowstore-pro.zip" ]]; then
         sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/wowstore-pro.zip" \
-            --activate --path="$SITE_PATH" --allow-root
+            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
         log "WowStore Pro installiert (Shop-Erweiterungen)"
     fi
 
     # WowRevenue Pro — On-Site-Funnels (One-Click Upsells, Order Bumps, Cross-Sells)
     if [[ -f "${PLUGINS_DIR}/wowrevenue-pro.zip" ]]; then
         sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/wowrevenue-pro.zip" \
-            --activate --path="$SITE_PATH" --allow-root
+            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
         log "WowRevenue Pro installiert (On-Site Upsell-/Cross-Sell-Funnels)"
     fi
 
@@ -1009,7 +1015,7 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     # Premium-only (kein Free auf wp.org) → vollständiges Plugin direkt aus Bucket-ZIP
     if [[ -f "${PLUGINS_DIR}/wowinvoice-pro.zip" ]]; then
         sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/wowinvoice-pro.zip" \
-            --activate --path="$SITE_PATH" --allow-root
+            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
         log "WowInvoice installiert (PDF-Rechnungen / Packing Slips)"
     else
         warn "WowInvoice ZIP fehlt: ${PLUGINS_DIR}/wowinvoice-pro.zip — sync-plugins.sh ausführen"
@@ -1024,7 +1030,7 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     fi
     if [[ -f "${PLUGINS_DIR}/funnelkit-automations-pro.zip" ]]; then
         sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/funnelkit-automations-pro.zip" \
-            --activate --path="$SITE_PATH" --allow-root
+            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
         log "FunnelKit Automations Pro installiert"
     fi
 
@@ -1069,7 +1075,7 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     fi
     if [[ -f "${PLUGINS_DIR}/pixel-manager-pro.zip" ]]; then
         sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/pixel-manager-pro.zip" \
-            --activate --path="$SITE_PATH" --allow-root
+            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
         log "Pixel Manager PRO installiert (TikTok/Pinterest/Bing + Server-Side CAPI)"
     else
         warn "Pixel Manager PRO ZIP fehlt: ${PLUGINS_DIR}/pixel-manager-pro.zip — für TikTok/Pinterest/Bing + CAPI nötig"
@@ -1083,9 +1089,9 @@ MAINWP_SECURITY_ID=""
 # Child aus lokalem Zip (Plugin-Bucket) bevorzugen, sonst aus dem wp.org-Repo — immer installieren.
 if [[ -f "${PLUGINS_DIR}/mainwp-child.zip" ]]; then
     sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/mainwp-child.zip" \
-        --activate --path="$SITE_PATH" --allow-root
+        --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 else
-    sudo -u "$SYSTEM_USER" wp plugin install mainwp-child --activate --path="$SITE_PATH" --allow-root
+    sudo -u "$SYSTEM_USER" wp plugin install mainwp-child --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 fi
 
 # 16 Hex-Zeichen als Unique Security ID — wird beim Connect im Dashboard verlangt
@@ -1430,12 +1436,12 @@ die();
 MUPLUGIN
 log "Must-Use Plugin: Maintenance Mode erstellt"
 
-# ── WP-Cron via System-Cron ───────────────────────────────────────────────
-# DISABLE_WP_CRON=true → kein Cron-Aufruf bei jedem Seitenaufruf
-echo "*/5 * * * * ${SYSTEM_USER} /usr/local/bin/wp --path=${SITE_PATH} cron event run --due-now --allow-root 2>/dev/null" \
-    > "/etc/cron.d/wpcron-${DOMAIN_SAFE}"
-chmod 644 "/etc/cron.d/wpcron-${DOMAIN_SAFE}"
-log "WP-Cron via System-Cron (alle 5 Minuten)"
+# ── WP-Cron ────────────────────────────────────────────────────────────────
+# DISABLE_WP_CRON=true (wp-config) → kein Cron bei jedem Seitenaufruf.
+# KEIN lokaler System-Cron mehr: der WP-Cron wird zentral über provision-endpoint.sh
+# in Cronicle angelegt (Variante A, HTTP-GET auf wp-cron.php), direkt nach diesem
+# Install ausgelöst. So kann es keinen doppelten Cron (lokal + Cronicle) geben.
+log "WP-Cron: wird zentral in Cronicle angelegt (provision-endpoint.sh) — kein lokaler Cron"
 
 # ── Berechtigungen setzen ─────────────────────────────────────────────────
 chown -R "${SYSTEM_USER}:www-data" "$SITE_PATH"

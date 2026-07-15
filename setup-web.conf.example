@@ -29,11 +29,9 @@ WEBHOOK_URL=https://uptime-kuma.example.com/api/push/DEIN_KEY
 SEOPRESS_KEY=
 
 # ── Zentrale Matomo-Instanz (optional; Host OHNE https:// und ohne Slash) ──
-# Genutzt von install-wp.sh für SEOpress-Matomo-Tracking. Ohne --matomo-site-id legt
-# install-wp die Matomo-Site automatisch per API an — dazu MATOMO_TOKEN (Super-User) setzen.
-# MATOMO_TOKEN erscheint nie in Logs/CLI (Übergabe per stdin an curl). chmod 600 beachten.
+# Nur informativ in /etc/wp-hosting/config. Matomo-Site-Anlage + SEOpress-Tracking
+# laufen zentral über provision-endpoint.sh (der Matomo-Token bleibt dort, nicht auf der VM).
 MATOMO_URL=analytics.deine-domain.de
-MATOMO_TOKEN=
 
 # ── Remote-Backup (Pflicht): RCLONE_REMOTE = r2 | s3backup | sftpbackup ──
 RCLONE_REMOTE=r2
@@ -57,9 +55,13 @@ R2_BUCKET=wp-backups
 # SFTP_PATH=/backups
 # SFTP_PORT=22                # SSH-Key /root/.ssh/id_rsa muss am Ziel hinterlegt sein
 
-# ── Plugin-/Theme-Buckets (optional, leer = überspringen) ──
+# ── Plugin-/Theme-Buckets (bei RCLONE_REMOTE=r2 optional — Default wp-plugins/wp-themes) ──
 PLUGIN_BUCKET=wp-plugins
 THEME_BUCKET=wp-themes
+
+# ── Monitoring (optional): IP des Netdata-Parents. Nur wenn gesetzt wird Port
+#    19999 in der Firewall für genau diese Quelle geöffnet (sonst bleibt 19999 zu). ──
+NETDATA_PARENT_IP=
 
 # ── age-Backup-Verschlüsselung: true | false ──
 ENABLE_AGE=false

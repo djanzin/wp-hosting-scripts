@@ -12,6 +12,29 @@ info() { echo -e "${BLUE}[i]${NC} $1"; }
 
 [[ $EUID -ne 0 ]] && err "Als root ausführen: sudo bash setup-db.sh"
 
+# ── Non-interaktiver Modus: --config <datei> ──────────────────────────────
+NONINT=false
+if [[ "${1:-}" == "--config" ]]; then
+    [[ -z "${2:-}" ]] && err "--config braucht einen Dateipfad."
+    [[ -f "$2" ]] || err "Config-Datei nicht gefunden: $2"
+    # shellcheck disable=SC1090
+    source "$2"
+    NONINT=true
+fi
+
+# ask VAR "Prompt" — fragt nur interaktiv und nur wenn VAR noch leer ist.
+ask() {
+    local __var="$1" __prompt="$2"
+    [[ -n "${!__var:-}" ]] && return 0
+    if $NONINT; then printf -v "$__var" '%s' ""; return 0; fi
+    read -rp "$__prompt" "$__var"
+}
+confirm_or_die() {
+    $NONINT && return 0
+    local ans; read -rp "$1" ans
+    [[ "$ans" != "j" && "$ans" != "J" ]] && err "Abgebrochen."
+}
+
 # clear scheitert ohne TERM (z.B. non-interaktiv über SSH) und würde mit set -e
 # das ganze Skript killen → non-fatal machen.
 clear 2>/dev/null || true
@@ -21,26 +44,48 @@ echo "║   Datenbank-VM Setup — Ubuntu 24.04          ║"
 echo "╚══════════════════════════════════════════════╝"
 echo -e "${NC}"
 
-read -rp "IPs der Web-VMs, kommagetrennt (z.B. 192.168.1.10,192.168.1.11): " WEB_VM_IPS
-[[ -z "$WEB_VM_IPS" ]] && err "Mindestens eine Web-VM-IP angeben."
+ask WEB_VM_IPS "IPs der Web-VMs, kommagetrennt (z.B. 192.168.1.10,192.168.1.11): "
+[[ -z "${WEB_VM_IPS:-}" ]] && err "Mindestens eine Web-VM-IP angeben (WEB_VM_IPS)."
 
-read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
+ask WEBHOOK_URL "Webhook-URL für Benachrichtigungen (leer = deaktiviert): "
+WEBHOOK_URL="${WEBHOOK_URL:-}"
 
-read -rp "age Public-Key für Backup-Verschlüsselung (leer = unverschlüsselt): " AGE_RECIPIENT
+ask AGE_RECIPIENT "age Public-Key für Backup-Verschlüsselung (leer = unverschlüsselt): "
+AGE_RECIPIENT="${AGE_RECIPIENT:-}"
 [[ -n "$AGE_RECIPIENT" && ! "$AGE_RECIPIENT" =~ ^age1 ]] && err "Ungültiger age Public-Key (muss mit 'age1' beginnen)."
-
-echo ""
-echo -e "${BOLD}Remote-Backup für MariaDB-Dumps — PFLICHT${NC}"
-echo "  1) Cloudflare R2"
-echo "  2) S3-kompatibel (AWS, MinIO, etc.)"
-echo "  3) SFTP"
-echo ""
 
 # Hostname für eindeutigen Pfad (Konsistenz mit Web-VMs, future-proof bei mehreren DB-VMs)
 DB_HOSTNAME=$(hostname -s)
 
-RCLONE_REMOTE=""
-while [[ -z "$RCLONE_REMOTE" ]]; do
+RCLONE_REMOTE="${RCLONE_REMOTE:-}"
+if [[ -n "$RCLONE_REMOTE" ]]; then
+    # Config-Modus: Remote vorab gesetzt → Felder aus Config, RCLONE_DEST ableiten.
+    case "$RCLONE_REMOTE" in
+        r2)
+            [[ -z "${R2_ACCOUNT_ID:-}" || -z "${R2_KEY_ID:-}" || -z "${R2_KEY_SECRET:-}" || -z "${R2_BUCKET:-}" ]] && \
+                err "R2-Config unvollständig (R2_ACCOUNT_ID/R2_KEY_ID/R2_KEY_SECRET/R2_BUCKET)."
+            RCLONE_CHOICE=1; RCLONE_DEST="r2:${R2_BUCKET}/${DB_HOSTNAME}" ;;
+        s3backup)
+            [[ -z "${S3_BUCKET:-}" || -z "${S3_KEY_ID:-}" || -z "${S3_KEY_SECRET:-}" ]] && \
+                err "S3-Config unvollständig (S3_BUCKET/S3_KEY_ID/S3_KEY_SECRET)."
+            S3_REGION="${S3_REGION:-}"; S3_ENDPOINT="${S3_ENDPOINT:-}"
+            RCLONE_CHOICE=2; RCLONE_DEST="s3backup:${S3_BUCKET}/${DB_HOSTNAME}" ;;
+        sftpbackup)
+            [[ -z "${SFTP_HOST:-}" || -z "${SFTP_USER:-}" || -z "${SFTP_PATH:-}" ]] && \
+                err "SFTP-Config unvollständig (SFTP_HOST/SFTP_USER/SFTP_PATH)."
+            SFTP_PORT="${SFTP_PORT:-22}"
+            RCLONE_CHOICE=3; RCLONE_DEST="sftpbackup:${SFTP_PATH}/${DB_HOSTNAME}" ;;
+        *) err "Ungültiger RCLONE_REMOTE: ${RCLONE_REMOTE} (erlaubt: r2, s3backup, sftpbackup)." ;;
+    esac
+else
+    $NONINT && err "RCLONE_REMOTE ist im --config-Modus Pflicht (r2 | s3backup | sftpbackup)."
+    echo ""
+    echo -e "${BOLD}Remote-Backup für MariaDB-Dumps — PFLICHT${NC}"
+    echo "  1) Cloudflare R2"
+    echo "  2) S3-kompatibel (AWS, MinIO, etc.)"
+    echo "  3) SFTP"
+    echo ""
+    while [[ -z "$RCLONE_REMOTE" ]]; do
     read -rp "Auswahl [1-3]: " RCLONE_CHOICE
     case "$RCLONE_CHOICE" in
         1)
@@ -76,15 +121,15 @@ while [[ -z "$RCLONE_REMOTE" ]]; do
             ;;
         *) warn "Ungültig — Remote-Backup ist Pflicht. Bitte 1, 2 oder 3 wählen." ;;
     esac
-done
+    done
+fi
 
 info "Remote-Backup-Pfad: ${BOLD}${RCLONE_DEST}${NC}"
 
 echo ""
 info "Datenbank-VM wird für ${BOLD}WordPress & WooCommerce${NC} optimiert"
 echo ""
-read -rp "Einrichtung starten? [j/N]: " confirm
-[[ "$confirm" != "j" && "$confirm" != "J" ]] && err "Abgebrochen."
+confirm_or_die "Einrichtung starten? [j/N]: "
 
 # ── System aktualisieren ───────────────────────────────────────────────────
 info "System wird aktualisiert..."
@@ -106,7 +151,7 @@ if [[ -n "$RCLONE_REMOTE" ]]; then
 
     mkdir -p /root/.config/rclone
     case "$RCLONE_CHOICE" in
-        1) cat >> /root/.config/rclone/rclone.conf <<EOF
+        1) cat > /root/.config/rclone/rclone.conf <<EOF
 
 [r2]
 type = s3
@@ -117,7 +162,7 @@ endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
 acl = private
 EOF
             ;;
-        2) cat >> /root/.config/rclone/rclone.conf <<EOF
+        2) cat > /root/.config/rclone/rclone.conf <<EOF
 
 [s3backup]
 type = s3
@@ -129,7 +174,7 @@ ${S3_ENDPOINT:+endpoint = ${S3_ENDPOINT}}
 acl = private
 EOF
             ;;
-        3) cat >> /root/.config/rclone/rclone.conf <<EOF
+        3) cat > /root/.config/rclone/rclone.conf <<EOF
 
 [sftpbackup]
 type = sftp
@@ -299,33 +344,46 @@ for VM_IP in "${VM_IPS[@]}"; do
     log "UFW: MySQL-Zugriff von ${VM_IP} erlaubt"
 done
 
-ufw allow 19999/tcp
+# Netdata streamt OUTBOUND zum Parent; 19999 NICHT weltoffen. Nur für Parent öffnen.
+if [[ -n "${NETDATA_PARENT_IP:-}" ]]; then
+    ufw allow from "$NETDATA_PARENT_IP" to any port 19999
+fi
 ufw --force enable
-log "Firewall konfiguriert (22, 3306 von Web-VMs, 19999)"
+log "Firewall konfiguriert (22, 3306 von Web-VMs${NETDATA_PARENT_IP:+, 19999 nur von ${NETDATA_PARENT_IP}})"
 
-# ── SSH Hardening ─────────────────────────────────────────────────────────
-SSH_CONFIG="/etc/ssh/sshd_config"
-sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'          "$SSH_CONFIG"
-sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/'                  "$SSH_CONFIG"
-sed -i 's/^#*LoginGraceTime.*/LoginGraceTime 20/'             "$SSH_CONFIG"
-sed -i 's/^#*X11Forwarding.*/X11Forwarding no/'               "$SSH_CONFIG"
-sed -i 's/^#*AllowTcpForwarding.*/AllowTcpForwarding no/'     "$SSH_CONFIG"
-
-echo ""
-read -rp "SSH Public Key für ubuntu-User hinterlegen? (leer = überspringen): " SSH_PUB_KEY
-if [[ -n "$SSH_PUB_KEY" ]]; then
+# ── SSH Hardening (per Drop-in — Ubuntu includet sshd_config.d/*.conf zuerst;
+#    ein 01-* gewinnt per first-match-wins über 50-cloud-init.conf) ──────────
+ask SSH_PUB_KEY "SSH Public Key für ubuntu-User hinterlegen? (leer = überspringen): "
+SSH_PUB_KEY="${SSH_PUB_KEY:-}"
+SSHD_DROPIN="/etc/ssh/sshd_config.d/01-wp-hosting-hardening.conf"
+{
+    echo "PermitRootLogin no"
+    echo "MaxAuthTries 3"
+    echo "LoginGraceTime 20"
+    echo "X11Forwarding no"
+    echo "AllowTcpForwarding no"
+    echo "PubkeyAuthentication yes"
+} > "$SSHD_DROPIN"
+if [[ -n "$SSH_PUB_KEY" ]] && id ubuntu &>/dev/null; then
     mkdir -p /home/ubuntu/.ssh
-    echo "$SSH_PUB_KEY" >> /home/ubuntu/.ssh/authorized_keys
+    grep -qF "$SSH_PUB_KEY" /home/ubuntu/.ssh/authorized_keys 2>/dev/null \
+        || echo "$SSH_PUB_KEY" >> /home/ubuntu/.ssh/authorized_keys
     chmod 700 /home/ubuntu/.ssh
     chmod 600 /home/ubuntu/.ssh/authorized_keys
-    chown -R ubuntu:ubuntu /home/ubuntu/.ssh 2>/dev/null || true
-    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' "$SSH_CONFIG"
-    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/'    "$SSH_CONFIG"
-    log "SSH Key hinterlegt — Passwort-Login deaktiviert"
+    chown -R ubuntu:ubuntu /home/ubuntu/.ssh
+    echo "PasswordAuthentication no" >> "$SSHD_DROPIN"
+    log "SSH Key hinterlegt — Passwort-Login deaktiviert (${SSHD_DROPIN})"
+elif [[ -n "$SSH_PUB_KEY" ]]; then
+    warn "User 'ubuntu' fehlt — SSH-Key NICHT hinterlegt, Passwort-Login bleibt aktiv (kein Lockout-Risiko)."
 else
     warn "Kein SSH Key — Passwort-Login bleibt aktiv"
 fi
-systemctl restart ssh
+chmod 644 "$SSHD_DROPIN"
+if sshd -t 2>/dev/null; then
+    systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || warn "SSH-Neustart fehlgeschlagen"
+else
+    warn "sshd-Config-Test (sshd -t) fehlgeschlagen — SSH NICHT neu gestartet (Härtung liegt in ${SSHD_DROPIN})."
+fi
 
 # ── Netdata ───────────────────────────────────────────────────────────────
 if systemctl is-active --quiet netdata 2>/dev/null; then
