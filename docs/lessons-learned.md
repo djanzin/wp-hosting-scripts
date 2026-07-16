@@ -76,3 +76,22 @@ Secret-Speicher auf der Platte.
 
 **Regel:** Ein generiertes Secret in dem Moment, in dem es entsteht, in den
 Secret-Manager schreiben. Keine Klartext-Sammeldatei als Zwischenschritt.
+
+## 2026-07-16 · Gleiche Funktion, zwei Implementierungen: age-Verschlüsselung
+
+**Symptom:** `setup-db.sh` und `setup-web.sh` verschlüsselten Backups beide mit age,
+aber unterschiedlich: `setup-db` nahm einen Public-Key (`AGE_RECIPIENT`) aus der Config
+(kein Secret auf der Maschine), `setup-web` erzeugte pro VM ein eigenes Keypair und
+legte den Secret-Key auf der (potenziell exponierten) Web-VM ab.
+
+**Warum das ein Problem ist:** (1) Sicherheit — ein Secret-Key, der Backups
+entschlüsselt, gehört nicht auf die Maschine, deren Backups er schützt. (2) Betrieb —
+N VM-Keypairs statt eines Stack-Keys sind mehr Schlüssel-Verwaltung. (3) Inkonsistenz —
+zwei Wege für dieselbe Sache laden zu Fehlern ein.
+
+**Fix:** `setup-web.sh` akzeptiert jetzt `AGE_RECIPIENT` (Public-Key) wie `setup-db.sh`;
+ist er gesetzt, wird nur der Public-Key hinterlegt und kein Secret erzeugt. Das lokale
+Keypair bleibt als Fallback, wenn kein Recipient angegeben ist.
+
+**Regel:** Dieselbe Funktion in mehreren Skripten IMMER gleich implementieren.
+Secret-Material nie auf der Maschine ablegen, die es schützen soll.
