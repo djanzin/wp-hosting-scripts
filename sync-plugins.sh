@@ -67,7 +67,7 @@ sync_bucket() {
     info "Sync ${RCLONE_REMOTE}:${bucket}/ → ${local_dir}/"
     if rclone sync "${RCLONE_REMOTE}:${bucket}/" "$local_dir/" --include "*.zip" 2>&1; then
         local found
-        found=$(ls "$local_dir"/*.zip 2>/dev/null | wc -l)
+        found=$(ls "$local_dir"/*.zip 2>/dev/null | wc -l) || true  # leeres Glob: ls exit 2 → pipefail-Abbruch vermeiden
         log "${found} ${label}-ZIP(s) lokal verfügbar"
         ls -lh "$local_dir"/*.zip 2>/dev/null | awk '{printf "  %-40s %s\n", $9, $5}'
     else

@@ -158,3 +158,21 @@ reinen activate-Prozess ist `plugin-install.php` nicht vorgeladen.
 
 **Regel:** Plugins, deren Aktivierungs-Hook `plugins_api()`/Update-APIs anfasst,
 nie mit `install --activate` in einem Zug installieren — Schritte trennen.
+
+## 2026-07-16 · `ls glob | …` in `$(...)` bricht bei leerem Match unter pipefail ab
+
+**Symptom:** Ein Skript bricht **kommentarlos mit EXIT 2** ab (keine Fehlermeldung) —
+z.B. `install-wp --type mainwp` direkt nach dem Start auf einer VM ohne Sites.
+
+**Ursache:** `VAR=$(ls /pfad/*.ext 2>/dev/null | wc -l)` — matcht das Glob nichts,
+gibt `ls` **exit 2**. `2>/dev/null` unterdrückt nur die Meldung, **nicht** den Exit-Code.
+Unter `set -o pipefail` propagiert die Pipe die 2, `set -e` bricht ab. (Ironisch: der
+Zähl-Check, der die *zweite* Site auf einer MainWP-VM verhindern sollte, crashte bei der
+*ersten* — leeres Verzeichnis.) Trügerisch: die Stellen in `setup-web` crashten nicht,
+weil dort tatsächlich .zip-Dateien lagen (Glob matchte) — der Bug schläft, bis das Glob leer ist.
+
+**Fix:** `|| true` anhängen (Exit-Code egal, nur die wc-Zahl zählt) — konsistent mit dem
+bereits in `status.sh` verwendeten Muster. Betraf `install-wp`, `sync-plugins`, `setup-web` (2×).
+
+**Regel:** Jede `$(ls glob … | …)`-Zählung in einer command-substitution unter pipefail
+mit `|| true` absichern (oder bash-nativ mit `nullglob`).

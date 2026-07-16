@@ -329,7 +329,7 @@ EOF
         info "Lade Plugin-ZIPs aus ${RCLONE_REMOTE}:${PLUGIN_BUCKET}..."
         if rclone copy "${RCLONE_REMOTE}:${PLUGIN_BUCKET}/" /etc/wp-hosting/plugins/ \
             --include "*.zip" 2>/dev/null; then
-            FOUND=$(ls /etc/wp-hosting/plugins/*.zip 2>/dev/null | wc -l)
+            FOUND=$(ls /etc/wp-hosting/plugins/*.zip 2>/dev/null | wc -l) || true  # leeres Glob: ls exit 2 → pipefail-Abbruch vermeiden
             log "  ${FOUND} Plugin-ZIP(s) geladen → /etc/wp-hosting/plugins/"
         else
             warn "  Plugin-Bucket leer oder nicht erreichbar — manuell befüllen"
@@ -342,7 +342,7 @@ EOF
         info "Lade Theme-ZIPs aus ${RCLONE_REMOTE}:${THEME_BUCKET}..."
         if rclone copy "${RCLONE_REMOTE}:${THEME_BUCKET}/" /etc/wp-hosting/themes/ \
             --include "*.zip" 2>/dev/null; then
-            FOUND=$(ls /etc/wp-hosting/themes/*.zip 2>/dev/null | wc -l)
+            FOUND=$(ls /etc/wp-hosting/themes/*.zip 2>/dev/null | wc -l) || true  # leeres Glob: ls exit 2 → pipefail-Abbruch vermeiden
             log "  ${FOUND} Theme-ZIP(s) geladen → /etc/wp-hosting/themes/"
         else
             warn "  Theme-Bucket leer oder nicht erreichbar — manuell befüllen"

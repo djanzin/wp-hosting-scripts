@@ -110,7 +110,8 @@ if [[ "$SITE_TYPE" == "mainwp" ]]; then
     if [[ "${VM_TYPE:-}" != "mainwp" ]]; then
         err "Diese VM ist nicht als MainWP-VM eingerichtet (VM_TYPE=${VM_TYPE:-unbekannt}). Erst setup-web.sh mit Option 3 (MainWP Dashboard) ausführen."
     fi
-    EXISTING_SITES=$(ls -1 /etc/wp-hosting/sites/*.txt 2>/dev/null | wc -l)
+    # || true: leeres Glob → ls exit 2 → bräche unter set -o pipefail + set -e ab (nur wc-Zahl zählt)
+    EXISTING_SITES=$(ls -1 /etc/wp-hosting/sites/*.txt 2>/dev/null | wc -l) || true
     if [[ ${EXISTING_SITES} -gt 0 ]]; then
         err "MainWP-VM ist Single-Site-by-design — es existiert bereits eine Site."
     fi
