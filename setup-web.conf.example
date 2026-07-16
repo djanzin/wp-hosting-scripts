@@ -66,6 +66,12 @@ NETDATA_PARENT_IP=
 # ── age-Backup-Verschlüsselung: true | false ──
 ENABLE_AGE=false
 
+# ── age Public-Key (optional; muss mit age1 beginnen) ──
+# Gesetzt + ENABLE_AGE=true → Backups werden gegen diesen Stack-Recipient verschlüsselt
+# und es wird KEIN Secret-Key auf der VM erzeugt (empfohlen — Secret bleibt zentral im
+# Passwort-Manager). Leer + ENABLE_AGE=true → lokales Keypair, Secret liegt auf der VM.
+AGE_RECIPIENT=
+
 # ── SSH Public Key für ubuntu-User (optional; wegen Leerzeichen IMMER quoten) ──
 # Beispiel: SSH_PUB_KEY="ssh-ed25519 AAAA... user@host"
 SSH_PUB_KEY=

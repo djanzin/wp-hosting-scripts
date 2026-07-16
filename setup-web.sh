@@ -237,6 +237,12 @@ fi
 # "yes" bei `$ENABLE_AGE && …` als Kommando ausgeführt (Hänger).
 case "${ENABLE_AGE,,}" in true|1|yes|y|j) ENABLE_AGE=true ;; *) ENABLE_AGE=false ;; esac
 
+# AGE_RECIPIENT (optionaler Stack-Public-Key): ist er gesetzt, wird gegen ihn
+# verschlüsselt und KEIN lokales Keypair erzeugt — der Secret-Key bleibt zentral
+# (Passwort-Manager), nicht auf der Web-VM. Konsistent mit setup-db.sh.
+AGE_RECIPIENT="${AGE_RECIPIENT:-}"
+[[ -n "$AGE_RECIPIENT" && ! "$AGE_RECIPIENT" =~ ^age1 ]] && err "Ungültiger age Public-Key (muss mit 'age1' beginnen)."
+
 echo ""
 info "VM-Typ: ${BOLD}${VM_TYPE}${NC}"
 info "DB-Host: ${BOLD}${DB_HOST}${NC}"
@@ -1276,7 +1282,14 @@ if $ENABLE_AGE; then
     AGE_KEY_FILE="/etc/wp-hosting/backup-key.txt"
     AGE_PUB_FILE="/etc/wp-hosting/backup-recipient.txt"
 
-    if [[ -f "$AGE_KEY_FILE" ]]; then
+    if [[ -n "$AGE_RECIPIENT" ]]; then
+        # Stack-Recipient aus Config: nur den Public-Key hinterlegen, KEIN Keypair
+        # auf der VM erzeugen. Der Secret-Key lebt zentral (Passwort-Manager), nicht
+        # auf der potenziell exponierten Web-VM.
+        echo "$AGE_RECIPIENT" > "$AGE_PUB_FILE"
+        chmod 644 "$AGE_PUB_FILE"
+        log "age-Recipient aus Config übernommen (kein Secret auf der VM)"
+    elif [[ -f "$AGE_KEY_FILE" ]]; then
         warn "age-Key existiert bereits — wird beibehalten"
     else
         age-keygen -o "$AGE_KEY_FILE" 2>/dev/null
