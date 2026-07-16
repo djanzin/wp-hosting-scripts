@@ -164,3 +164,7 @@ echo -e "  Remote-Mirror:      ${BOLD}${SYNC_STATUS}${NC}"
 echo -e "  Aufbewahrung:       ${BOLD}${KEEP_DAYS} Tage${NC}"
 echo -e "  Log:                ${BOLD}${LOG}${NC}"
 echo ""
+# Non-zero, wenn der angeforderte Remote-Sync fehlschlug (Cron/Monitoring soll das sehen).
+# 'nicht konfiguriert'/'rclone fehlt'/'übersprungen' = bewusst kein Remote → kein Fehler.
+[[ "$SYNC_STATUS" == FEHLER* ]] && exit 1
+exit 0

@@ -91,7 +91,7 @@ collect_backups() {
         key=$(basename "$f" | sed -E "$pattern_re")
         [[ -z "${first_seen[$key]:-}" ]] && first_seen[$key]="$f"
         last_seen[$key]="$f"
-    done < <(ls -t "$dir"/*.tar.gz "$dir"/*.tar.gz.age "$dir"/*.sql.gz "$dir"/*.sql.gz.age 2>/dev/null || true)
+    done < <(find "$dir" -type f \( -name '*.tar.gz' -o -name '*.tar.gz.age' -o -name '*.sql.gz' -o -name '*.sql.gz.age' \) -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
     # Jüngstes (first in -t order) + im DEEP-Modus auch ältestes
     for k in "${!first_seen[@]}"; do
         echo "${first_seen[$k]}"  # jüngstes

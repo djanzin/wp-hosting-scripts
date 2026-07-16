@@ -135,6 +135,7 @@ if $RESTORE_DB; then
                 done
                 echo ""
                 read -rp "Auswahl [1-${#DB_BACKUPS[@]}]: " db_idx
+                { [[ ! "$db_idx" =~ ^[0-9]+$ ]] || [[ $db_idx -lt 1 ]] || [[ $db_idx -gt ${#DB_BACKUPS[@]} ]]; } && err "Ungültige Auswahl."
                 SQL_FILE="${DB_BACKUPS[$((db_idx-1))]}"
             fi
             ;;
@@ -291,9 +292,11 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 # Maintenance-Mode wieder aktivieren
 touch "$MAINT_FLAG" && chown "${SYSTEM_USER}:www-data" "$MAINT_FLAG" 2>/dev/null || true
 
+HTTP_OK=true
 if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "301" || "$HTTP_CODE" == "302" ]]; then
     log "HTTP-Test OK (${HTTP_CODE})"
 else
+    HTTP_OK=false
     warn "HTTP-Test FEHLGESCHLAGEN (${HTTP_CODE})"
     if $RESTORE_FILES && [[ -n "$ROLLBACK" && -d "$ROLLBACK" ]]; then
         echo ""
@@ -310,10 +313,20 @@ else
 fi
 
 # ── Ausgabe ───────────────────────────────────────────────────────────────
+# Kein Erfolg vortäuschen, wenn gar nichts wiederhergestellt wurde
+if ! $RESTORE_FILES && ! $RESTORE_DB; then
+    err "Es wurde nichts wiederhergestellt (keine Dateien/DB ausgewählt oder kein Backup gefunden)."
+fi
 echo ""
-echo -e "${BOLD}╔══════════════════════════════════════════════╗"
-echo -e "║   Wiederherstellung abgeschlossen ✓          ║"
-echo -e "╚══════════════════════════════════════════════╝${NC}"
+if [[ "${HTTP_OK:-true}" == "true" ]]; then
+    echo -e "${BOLD}╔══════════════════════════════════════════════╗"
+    echo -e "║   Wiederherstellung abgeschlossen ✓          ║"
+    echo -e "╚══════════════════════════════════════════════╝${NC}"
+else
+    echo -e "${BOLD}${RED}╔══════════════════════════════════════════════╗"
+    echo -e "║   Wiederherstellung mit FEHLER (HTTP-Test)   ║"
+    echo -e "╚══════════════════════════════════════════════╝${NC}"
+fi
 echo ""
 echo -e "  Domain:  ${BOLD}https://${DOMAIN}${NC}"
 $RESTORE_FILES && echo -e "  Dateien: ${BOLD}wiederhergestellt${NC}"
@@ -322,3 +335,5 @@ echo ""
 echo -e "${YELLOW}  → Site ist im Maintenance Mode — prüfen und freischalten:${NC}"
 echo -e "${YELLOW}    sudo bash maintenance.sh${NC}"
 echo ""
+# Exit-Code für Automatisierung: non-zero, wenn der HTTP-Test fehlschlug
+[[ "${HTTP_OK:-true}" == "true" ]] && exit 0 || exit 1

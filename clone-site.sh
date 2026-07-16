@@ -33,17 +33,19 @@ echo ""
 
 read -rp "Quell-Domain (zu klonende Site): " SRC_DOMAIN
 SRC_DOMAIN=$(echo "$SRC_DOMAIN" | tr '[:upper:]' '[:lower:]' | sed 's/^www\.//')
+[[ ! "$SRC_DOMAIN" =~ ^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$ ]] && err "Ungültige Quell-Domain: ${SRC_DOMAIN}"
 [[ ! -f "${SITES_DIR}/${SRC_DOMAIN}.txt" ]] && err "Site '${SRC_DOMAIN}' nicht gefunden."
 
 read -rp "Ziel-Domain (neue Domain, z.B. staging.meinshop.de): " DST_DOMAIN
 DST_DOMAIN=$(echo "$DST_DOMAIN" | tr '[:upper:]' '[:lower:]' | sed 's/^www\.//')
 [[ -z "$DST_DOMAIN" ]] && err "Ziel-Domain darf nicht leer sein."
+[[ ! "$DST_DOMAIN" =~ ^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$ ]] && err "Ungültige Ziel-Domain: ${DST_DOMAIN}"
 [[ -f "${SITES_DIR}/${DST_DOMAIN}.txt" ]] && err "Site '${DST_DOMAIN}' existiert bereits."
 [[ -d "/var/www/${DST_DOMAIN}" ]] && err "Verzeichnis /var/www/${DST_DOMAIN} existiert bereits."
 
 # Quell-Daten lesen
 SRC_PATH="/var/www/${SRC_DOMAIN}"
-SRC_SAFE=$(echo "$SRC_DOMAIN" | tr '.' '_' | tr '-' '_')
+SRC_SAFE="$(printf '%s' "$SRC_DOMAIN" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | cut -c1-12)_$(printf '%s' "$SRC_DOMAIN" | tr '[:upper:]' '[:lower:]' | sha256sum | cut -c1-8)"
 SRC_DB_NAME=$(grep "^DB-Name:" "${SITES_DIR}/${SRC_DOMAIN}.txt" | awk '{print $2}')
 SRC_TYPE=$(grep "^Typ:" "${SITES_DIR}/${SRC_DOMAIN}.txt" | awk '{print $2}')
 [[ ! -d "$SRC_PATH" ]] && err "Quell-Verzeichnis nicht gefunden: ${SRC_PATH}"
@@ -56,12 +58,12 @@ read -rp "Klonen starten? [j/N]: " confirm
 [[ "$confirm" != "j" && "$confirm" != "J" ]] && err "Abgebrochen."
 
 # ── Ziel-Variablen ─────────────────────────────────────────────────────────
-DST_SAFE=$(echo "$DST_DOMAIN" | tr '.' '_' | tr '-' '_')
+DST_SAFE="$(printf '%s' "$DST_DOMAIN" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | cut -c1-12)_$(printf '%s' "$DST_DOMAIN" | tr '[:upper:]' '[:lower:]' | sha256sum | cut -c1-8)"
 DST_PATH="/var/www/${DST_DOMAIN}"
 DST_DB_NAME="wp_${DST_SAFE}"
 DST_DB_USER="wpdb_$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 10 || true)"
 DST_DB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32) || true
-DST_SYSTEM_USER="wp_${DST_SAFE:0:20}"
+DST_SYSTEM_USER="wp_${DST_SAFE}"
 DST_SOCK="/run/php/php8.3-fpm-${DST_DOMAIN}.sock"
 WEB_VM_IP=$(hostname -I | awk '{print $1}')
 
@@ -82,7 +84,7 @@ info "Datenbank wird geklont..."
 mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" <<SQL
 CREATE DATABASE IF NOT EXISTS \`${DST_DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DST_DB_USER}'@'${WEB_VM_IP}' IDENTIFIED BY '${DST_DB_PASS}';
-GRANT ALL PRIVILEGES ON \`${DST_DB_NAME}\`.* TO '${DST_DB_USER}'@'${WEB_VM_IP}';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE TEMPORARY TABLES, LOCK TABLES, EXECUTE, CREATE VIEW, SHOW VIEW, CREATE ROUTINE, ALTER ROUTINE, EVENT, TRIGGER ON \`${DST_DB_NAME}\`.* TO '${DST_DB_USER}'@'${WEB_VM_IP}';
 FLUSH PRIVILEGES;
 SQL
 
@@ -115,7 +117,7 @@ DST_POOL_FILE="/etc/php/8.3/fpm/pool.d/${DST_DOMAIN}.conf"
 
 if [[ -f "$SRC_POOL_FILE" ]]; then
     sed "s|${SRC_DOMAIN}|${DST_DOMAIN}|g; s|${SRC_PATH}|${DST_PATH}|g; \
-         s|wp_${SRC_SAFE:0:20}|${DST_SYSTEM_USER}|g" \
+         s|wp_${SRC_SAFE}|${DST_SYSTEM_USER}|g" \
         "$SRC_POOL_FILE" > "$DST_POOL_FILE"
     log "PHP-FPM Pool erstellt"
 fi

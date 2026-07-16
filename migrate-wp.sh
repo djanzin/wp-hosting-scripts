@@ -51,12 +51,12 @@ echo ""
 read -rp "Auswahl [1/2]: " method_choice
 
 # ── Variablen ──────────────────────────────────────────────────────────────
-DOMAIN_SAFE=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
+DOMAIN_SAFE="$(printf '%s' "$DOMAIN" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | cut -c1-12)_$(printf '%s' "$DOMAIN" | tr '[:upper:]' '[:lower:]' | sha256sum | cut -c1-8)"
 SITE_PATH="/var/www/${DOMAIN}"
 DB_NAME="wp_${DOMAIN_SAFE}"
 DB_USER="wpdb_$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 10 || true)"
 DB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32) || true
-SYSTEM_USER="wp_${DOMAIN_SAFE:0:20}"
+SYSTEM_USER="wp_${DOMAIN_SAFE}"
 WEB_VM_IP=$(hostname -I | awk '{print $1}')
 
 case "$method_choice" in
@@ -121,7 +121,7 @@ case "$method_choice" in
         mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" <<SQL
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'${WEB_VM_IP}' IDENTIFIED BY '${DB_PASS}';
-GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'${WEB_VM_IP}';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE TEMPORARY TABLES, LOCK TABLES, EXECUTE, CREATE VIEW, SHOW VIEW, CREATE ROUTINE, ALTER ROUTINE, EVENT, TRIGGER ON \`${DB_NAME}\`.* TO '${DB_USER}'@'${WEB_VM_IP}';
 FLUSH PRIVILEGES;
 SQL
         zcat "$TMP_SQL" | mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME"
@@ -155,7 +155,7 @@ SQL
         mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" <<SQL
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'${WEB_VM_IP}' IDENTIFIED BY '${DB_PASS}';
-GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'${WEB_VM_IP}';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE TEMPORARY TABLES, LOCK TABLES, EXECUTE, CREATE VIEW, SHOW VIEW, CREATE ROUTINE, ALTER ROUTINE, EVENT, TRIGGER ON \`${DB_NAME}\`.* TO '${DB_USER}'@'${WEB_VM_IP}';
 FLUSH PRIVILEGES;
 SQL
         if [[ "$SQL_FILE" == *.gz ]]; then

@@ -46,8 +46,9 @@ CRED_FILE="${SITES_DIR}/${DOMAIN}.txt"
 # Daten aus Credentials-Datei lesen
 DB_NAME=$(grep "^DB-Name:" "$CRED_FILE" | awk '{print $2}')
 DB_USER=$(grep "^DB-User:" "$CRED_FILE" | awk '{print $2}')
-DOMAIN_SAFE=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
-SYSTEM_USER="wp_${DOMAIN_SAFE:0:20}"
+# Muss identisch zu install-wp.sh gebildet werden (deterministisch), damit der richtige System-User getroffen wird
+DOMAIN_SAFE="$(printf '%s' "$DOMAIN" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | cut -c1-12)_$(printf '%s' "$DOMAIN" | tr '[:upper:]' '[:lower:]' | sha256sum | cut -c1-8)"
+SYSTEM_USER="wp_${DOMAIN_SAFE}"
 SITE_PATH="/var/www/${DOMAIN}"
 
 echo ""

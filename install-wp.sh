@@ -156,8 +156,9 @@ if ! $NON_INTERACTIVE; then
 fi
 
 # ── Zugangsdaten generieren ────────────────────────────────────────────────
-# Sanitized Domain für Systemnamen (nur Buchstaben/Zahlen)
-DOMAIN_SAFE=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
+# Kollisionsfreier, deterministischer Identifier: lesbares Präfix + sha256-Hash der Domain.
+# (Früher: tr . _ | tr - _  → a-b.com und a.b-com kollidierten; :0:20 kappte lange Domains.)
+DOMAIN_SAFE="$(printf '%s' "$DOMAIN" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | cut -c1-12)_$(printf '%s' "$DOMAIN" | tr '[:upper:]' '[:lower:]' | sha256sum | cut -c1-8)"
 
 DB_NAME="wp_${DOMAIN_SAFE}"
 # DB-Username max 32 Zeichen (MariaDB-Limit)
@@ -168,7 +169,7 @@ WP_ADMIN_USER=$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 14) || true
 WP_ADMIN_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9!@#%^&*' | head -c 28) || true
 
 SITE_PATH="/var/www/${DOMAIN}"
-SYSTEM_USER="wp_${DOMAIN_SAFE:0:20}"
+SYSTEM_USER="wp_${DOMAIN_SAFE}"   # DOMAIN_SAFE ist bereits längenbegrenzt (≤21) → wp_<21> = ≤24 < 32
 PHP_POOL="/etc/php/8.3/fpm/pool.d/${DOMAIN}.conf"
 NGINX_VHOST="/etc/nginx/sites-available/${DOMAIN}"
 
@@ -200,12 +201,12 @@ if [[ -n "$FREE_MB" && "$FREE_MB" -lt 1024 ]]; then
 fi
 log "  Disk: ${FREE_MB} MB frei"
 
-# NPM erreichbar?
+# Reverse-Proxy (Caddy) erreichbar? — HTTPS-Port 443 (NPM/Port 81 gibt es nicht mehr)
 if [[ -n "${NPM_IP:-}" ]] && [[ "$NPM_IP" != "127.0.0.1" ]]; then
-    if timeout 2 bash -c "</dev/tcp/${NPM_IP}/81" 2>/dev/null; then
-        log "  NPM: ${NPM_IP}:81 erreichbar"
+    if timeout 2 bash -c "</dev/tcp/${NPM_IP}/443" 2>/dev/null; then
+        log "  Reverse-Proxy: ${NPM_IP}:443 erreichbar"
     else
-        warn "  NPM: ${NPM_IP}:81 NICHT erreichbar — Proxy-Host muss manuell angelegt werden"
+        warn "  Reverse-Proxy: ${NPM_IP}:443 NICHT erreichbar — Endpunkt via provision-endpoint.sh einrichten"
     fi
 fi
 
@@ -1579,7 +1580,7 @@ elif [[ "$SITE_TYPE" == "mainwp" ]]; then
 ── MainWP Dashboard ──────────────────────────
 Plugin:        MainWP Dashboard (zentrale Verwaltung)
 Dashboard URL: https://${DOMAIN}/wp-admin/admin.php?page=mainwp_tab
-Auth-Layer:    Authentik Forward-Auth via NPMPlus (siehe README)
+Auth-Layer:    Authentik Forward-Auth via Caddy (siehe homelab-caddy)
 EOF
 fi
 
@@ -1611,12 +1612,12 @@ echo -e "  SFTP-Pfad:     ${BOLD}/site${NC}"
 echo ""
 echo -e "${YELLOW}  → Zugangsdaten gespeichert: ${CRED_FILE}${NC}"
 echo -e "${YELLOW}  → Site ist im Maintenance Mode — freischalten: sudo bash maintenance.sh${NC}"
-echo -e "${YELLOW}  → NPM Proxy-Host für https://${DOMAIN} anlegen (→ Port 80).${NC}"
+echo -e "${YELLOW}  → Endpunkt via provision-endpoint.sh einrichten (Caddy-Block + DNS + Cron + Matomo).${NC}"
 if [[ -n "$MAINWP_SECURITY_ID" ]]; then
 echo -e "${YELLOW}  → MainWP: Im Dashboard 'Add Site' → URL + Admin-Login + Security ID ${BOLD}${MAINWP_SECURITY_ID}${NC}"
 elif [[ "$SITE_TYPE" == "mainwp" ]]; then
 echo -e "${YELLOW}  → MainWP Dashboard: ${BOLD}https://${DOMAIN}/wp-admin/admin.php?page=mainwp_tab${NC}"
-echo -e "${YELLOW}     NPM Proxy-Host mit Authentik-Forward-Auth einrichten (Snippet in README).${NC}"
+echo -e "${YELLOW}     Caddy-Block mit Authentik-Forward-Auth einrichten (siehe homelab-caddy).${NC}"
 fi
 if [[ "$SITE_TYPE" == "woocommerce" ]]; then
 echo -e "${YELLOW}  → Rechtliche Texte befüllen (Impressum, Datenschutz, AGB, Widerruf):${NC}"

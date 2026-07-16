@@ -684,16 +684,29 @@ ln -sf /etc/nginx/sites-available/phpmyadmin /etc/nginx/sites-enabled/
 log "phpMyAdmin installiert (Port 8080 → DB: ${DB_HOST}, Basic-Auth: admin)"
 
 # ── Filebrowser ───────────────────────────────────────────────────────────
-if command -v filebrowser &>/dev/null; then
-    info "Filebrowser bereits installiert"
+# Sicherheit: Mindestversion 2.45.2 erzwingen — <=2.45.1 ist von GHSA-6jqf-mv7m-3q7p
+# (kritische Netzwerk-Schwachstelle) betroffen. KEIN Fallback auf eine verwundbare Version;
+# ein Re-Run aktualisiert eine zu alte vorhandene Installation.
+FB_MIN="2.45.2"
+_fb_ge_min() { [ "$(printf '%s\n%s\n' "$FB_MIN" "$1" | sort -V | head -1)" = "$FB_MIN" ]; }
+FB_CUR=""
+command -v filebrowser &>/dev/null && FB_CUR=$(filebrowser version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+if [[ -n "$FB_CUR" ]] && _fb_ge_min "$FB_CUR"; then
+    info "Filebrowser bereits installiert (v${FB_CUR} ≥ ${FB_MIN})"
 else
-    info "Filebrowser wird installiert..."
+    [[ -n "$FB_CUR" ]] && warn "Filebrowser v${FB_CUR} ist veraltet/verwundbar (<${FB_MIN}) — wird aktualisiert"
+    info "Filebrowser wird installiert/aktualisiert..."
     FB_VERSION=$(curl -s https://api.github.com/repos/filebrowser/filebrowser/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
-    [[ -z "$FB_VERSION" ]] && { FB_VERSION="2.31.2"; warn "Filebrowser-Version via GitHub-API nicht ermittelbar — Fallback v${FB_VERSION}"; }
+    # Fallback auf die gepatchte Mindestversion (NICHT auf eine verwundbare)
+    [[ -z "$FB_VERSION" ]] && { FB_VERSION="$FB_MIN"; warn "GitHub-API nicht erreichbar — Fallback auf gepatchte v${FB_VERSION}"; }
+    # Mindestversion hart erzwingen, falls die API doch einen alten Tag liefert
+    _fb_ge_min "$FB_VERSION" || { warn "Ermittelte v${FB_VERSION} < ${FB_MIN} — erzwinge v${FB_MIN}"; FB_VERSION="$FB_MIN"; }
     if wget -q "https://github.com/filebrowser/filebrowser/releases/download/v${FB_VERSION}/linux-amd64-filebrowser.tar.gz" -O /tmp/fb.tar.gz && [[ -s /tmp/fb.tar.gz ]]; then
         tar -xzf /tmp/fb.tar.gz -C /usr/local/bin/ filebrowser
         chmod +x /usr/local/bin/filebrowser
         rm -f /tmp/fb.tar.gz
+        log "Filebrowser v${FB_VERSION} installiert"
     else
         warn "Filebrowser-Download fehlgeschlagen (v${FB_VERSION}) — übersprungen (SFTP bleibt verfügbar)"
         rm -f /tmp/fb.tar.gz
@@ -717,7 +730,11 @@ EOF
 
 filebrowser config init --database /etc/filebrowser/database.db \
     --address 0.0.0.0 --port 8090 --root /var/www 2>/dev/null || true
-filebrowser users add admin "$FB_ADMIN_PASS" --perm.admin --database /etc/filebrowser/database.db 2>/dev/null || true
+# Admin nur anlegen, wenn noch nicht vorhanden — sonst kein wirkungsloses PW anzeigen (#6)
+if ! filebrowser users add admin "$FB_ADMIN_PASS" --perm.admin --database /etc/filebrowser/database.db 2>/dev/null; then
+    FB_ADMIN_PASS="(unverändert — Filebrowser-Admin existierte bereits; zum Zurücksetzen: filebrowser users update admin --password …)"
+    warn "Filebrowser-Admin existiert bereits — Passwort NICHT geändert"
+fi
 
 cat > /etc/systemd/system/filebrowser.service <<'EOF'
 [Unit]
