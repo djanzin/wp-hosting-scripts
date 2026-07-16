@@ -171,6 +171,23 @@ Fatal (`Class BWFAN_API_Loader not found`) und **vergiftet alle folgenden wp-cli
 (Folgeschritte scheitern, Lauf bricht ab, Cleanup-Trap entfernt die Site). Solche Plugins
 nur **installieren, nicht aktivieren** — Aktivierung manuell, sobald die ZIP-Version passt.
 
+## 2026-07-16 · `userdel` ohne `groupdel` → verwaiste Gruppe blockiert `useradd` (Exit 9)
+
+**Symptom:** Ein Re-Install (`--resume`) bricht mit EXIT 9 bei `useradd` ab — obwohl der
+User zuvor per `if ! id "$USER"` geprüft wird.
+
+**Ursache:** `useradd` legt User **+ gleichnamige Gruppe** an. Beim Cleanup entfernt
+`userdel` nur den User, **nicht** die Gruppe (sie ist nicht leer — `www-data` wurde per
+`usermod -aG` Mitglied). Beim Re-Install ist der User weg (`id` schlägt fehl → `useradd`
+läuft), aber `useradd` will die **verwaiste gleichnamige Gruppe** neu anlegen →
+„group already exists", Exit-Code 9.
+
+**Fix:** (a) useradd robust: `groupadd -f "$USER"` + `useradd -g "$USER" …` (nutzt eine
+vorhandene Gruppe statt neu anzulegen). (b) Cleanup ergänzt `groupdel` nach `userdel`.
+
+**Regel:** Wer `userdel` macht, macht auch `groupdel` der gleichnamigen Gruppe. Wer
+`useradd` mit Auto-Gruppe nutzt, muss mit einer vorhandenen gleichnamigen Gruppe umgehen.
+
 ## 2026-07-16 · `ls glob | …` in `$(...)` bricht bei leerem Match unter pipefail ab
 
 **Symptom:** Ein Skript bricht **kommentarlos mit EXIT 2** ab (keine Fehlermeldung) —

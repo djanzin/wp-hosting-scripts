@@ -243,6 +243,7 @@ if [[ -d "$SITE_PATH" || -f "$NGINX_VHOST" ]]; then
         sed -i "\|${SITE_PATH}.*${SFTP_CHROOT}/site|d" /etc/fstab 2>/dev/null || true
         rm -rf "$SFTP_CHROOT" "$SITE_PATH"
         id "wp_${DOMAIN_SAFE:0:20}" &>/dev/null && userdel "wp_${DOMAIN_SAFE:0:20}" 2>/dev/null || true
+        getent group "wp_${DOMAIN_SAFE:0:20}" &>/dev/null && groupdel "wp_${DOMAIN_SAFE:0:20}" 2>/dev/null || true
         mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" 2>/dev/null <<SQL || true
 DROP DATABASE IF EXISTS \`wp_${DOMAIN_SAFE}\`;
 SQL
@@ -299,8 +300,10 @@ cleanup_on_error() {
     # Site-Verzeichnis entfernen
     rm -rf "$SITE_PATH"
 
-    # Systemuser entfernen
+    # Systemuser + gleichnamige Gruppe entfernen (Gruppe bleibt sonst verwaist zurück,
+    # weil www-data noch Mitglied ist → blockiert useradd beim nächsten Lauf).
     id "$SYSTEM_USER" &>/dev/null && userdel "$SYSTEM_USER" 2>/dev/null || true
+    getent group "$SYSTEM_USER" &>/dev/null && groupdel "$SYSTEM_USER" 2>/dev/null || true
 
     # Datenbank und User entfernen
     WEB_VM_IP=$(hostname -I | awk '{print $1}')
@@ -319,7 +322,12 @@ trap cleanup_on_error ERR
 
 # ── Systemuser anlegen ────────────────────────────────────────────────────
 if ! id "$SYSTEM_USER" &>/dev/null; then
-    useradd -r -s /sbin/nologin -d "$SITE_PATH" "$SYSTEM_USER"
+    # Die gleichnamige Gruppe kann aus einem früheren (abgebrochenen) Lauf verwaist
+    # übrig sein — userdel entfernt sie nicht, wenn www-data noch Mitglied ist. groupadd -f
+    # toleriert eine vorhandene Gruppe; useradd -g nutzt sie explizit, statt eine neue
+    # anzulegen (sonst "useradd: group already exists", Exit-Code 9 → Abbruch bei --resume).
+    groupadd -f "$SYSTEM_USER"
+    useradd -r -s /sbin/nologin -d "$SITE_PATH" -g "$SYSTEM_USER" "$SYSTEM_USER"
 fi
 # Mandantentrennung: jede Site hat eine eigene Gruppe (= Username). Der PHP-FPM-Worker
 # läuft als ${SYSTEM_USER}:${SYSTEM_USER} → PHP-Prozesse anderer Sites (fremde Gruppe)
