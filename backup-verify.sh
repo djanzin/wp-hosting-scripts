@@ -71,10 +71,12 @@ verify_file() {
     else
         # SQL-Dump: muss CREATE/INSERT enthalten
         local content
+        # || true: head -c schließt die Pipe → zcat (dekomprimiert die ganze Datei)
+        # bekommt SIGPIPE → Exit 141 unter set -o pipefail. Nur die 4 KB zählen.
         if [[ "$f" == *.age ]]; then
-            content=$(age -d -i "$AGE_KEY" "$f" 2>/dev/null | zcat 2>/dev/null | head -c 4096)
+            content=$(age -d -i "$AGE_KEY" "$f" 2>/dev/null | zcat 2>/dev/null | head -c 4096) || true
         else
-            content=$(zcat "$f" 2>/dev/null | head -c 4096)
+            content=$(zcat "$f" 2>/dev/null | head -c 4096) || true
         fi
         echo "$content" | grep -qE "^(CREATE|INSERT|--|/\*)" || \
             { FAILED_FILES+=("$f (kein SQL-Inhalt)"); return 1; }

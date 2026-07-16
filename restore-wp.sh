@@ -187,7 +187,7 @@ if $RESTORE_FILES && [[ -n "$BACKUP_FILE" ]]; then
     if [[ -d "${TMP_RESTORE}/wp-content" ]]; then
         SRC_CONTENT="${TMP_RESTORE}/wp-content"
     else
-        SRC_CONTENT=$(find "$TMP_RESTORE" -maxdepth 2 -type d -name "wp-content" | head -1)
+        SRC_CONTENT=$(find "$TMP_RESTORE" -maxdepth 2 -type d -name "wp-content" | head -1) || true  # head schließt Pipe → find SIGPIPE (141) unter pipefail
     fi
 
     if [[ -z "$SRC_CONTENT" ]]; then

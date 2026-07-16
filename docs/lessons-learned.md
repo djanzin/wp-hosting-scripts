@@ -205,3 +205,12 @@ bereits in `status.sh` verwendeten Muster. Betraf `install-wp`, `sync-plugins`, 
 
 **Regel:** Jede `$(ls glob … | …)`-Zählung in einer command-substitution unter pipefail
 mit `|| true` absichern (oder bash-nativ mit `nullglob`).
+
+**Variante SIGPIPE (Exit 141):** Dieselbe Klasse trifft `$(langer_befehl | head …)` —
+`head` schließt die Pipe nach seinen Zeilen/Bytes, der noch schreibende linke Befehl
+(`unzip -Z1`, `zcat` einer großen Datei, `find` mit vielen Treffern) bekommt **SIGPIPE**,
+was unter `set -o pipefail` als **Exit 141** (128+13) durchschlägt und `set -e` abbrechen
+lässt. Ironischerweise im `install_local_zip`-Helper selbst reproduziert (`unzip -Z1 | head -1`).
+Fix: `|| true` an die command-substitution. Betroffen abgesichert: `install-wp` (unzip),
+`backup-verify` (zcat), `restore-wp` (find). Stellen mit garantiert kurzer linker Ausgabe
+(`rclone --version`, `dig`, `df` → `head/tail`) sind praktisch unkritisch und bewusst gelassen.

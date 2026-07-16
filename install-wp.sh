@@ -18,7 +18,9 @@ info() { echo -e "${BLUE}[i]${NC} $1"; }
 install_local_zip() {
     local zip="$1" label="${2:-$1}" slug
     [[ -f "$zip" ]] || { warn "ZIP fehlt: ${zip} — ${label} übersprungen"; return 1; }
-    slug=$(unzip -Z1 "$zip" 2>/dev/null | head -1 | cut -d/ -f1)
+    # || true: head schließt die Pipe nach der 1. Zeile → unzip (schreibt alle ZIP-
+    # Einträge) bekommt SIGPIPE, was unter set -o pipefail als Exit 141 durchschlägt.
+    slug=$(unzip -Z1 "$zip" 2>/dev/null | head -1 | cut -d/ -f1) || true
     sudo -u "$SYSTEM_USER" wp plugin install "$zip" --path="$SITE_PATH" --allow-root \
         || { warn "${label}: Install fehlgeschlagen, übersprungen"; return 1; }
     if [[ -n "$slug" ]]; then
