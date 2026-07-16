@@ -140,12 +140,17 @@ for DOMAIN in "${SITES_TO_UPDATE[@]}"; do
     PLUGIN_COUNT=0
     THEME_COUNT=0
     if $UPDATE_PLUGINS; then
-        PLUGIN_COUNT=$($WP_CMD plugin update --all 2>&1 | grep -c "Updated" || echo "0")
+        # Exit-Code von wp erfassen (nicht nur "Updated"-Zeilen zählen)
+        PLUGIN_OUT=$($WP_CMD plugin update --all 2>&1) && PLUGIN_RC=0 || PLUGIN_RC=$?
+        PLUGIN_COUNT=$(echo "$PLUGIN_OUT" | grep -c "Updated" || true)
+        [[ ${PLUGIN_RC:-0} -ne 0 ]] && { warn "  Plugin-Update meldete Fehler (rc=${PLUGIN_RC})"; SITE_OK=false; }
         log "  Plugins: ${PLUGIN_COUNT} aktualisiert"
     fi
 
     if $UPDATE_THEMES; then
-        THEME_COUNT=$($WP_CMD theme update --all 2>&1 | grep -c "Updated" || echo "0")
+        THEME_OUT=$($WP_CMD theme update --all 2>&1) && THEME_RC=0 || THEME_RC=$?
+        THEME_COUNT=$(echo "$THEME_OUT" | grep -c "Updated" || true)
+        [[ ${THEME_RC:-0} -ne 0 ]] && { warn "  Theme-Update meldete Fehler (rc=${THEME_RC})"; SITE_OK=false; }
         log "  Themes: ${THEME_COUNT} aktualisiert"
     fi
 
@@ -207,3 +212,6 @@ echo -e "  Erfolgreich:  ${BOLD}${#UPDATED[@]}${NC} Site(s)"
 [[ ${#SKIPPED[@]} -gt 0 ]] && echo -e "  Übersprungen: ${BOLD}${#SKIPPED[@]}${NC} Site(s)"
 [[ ${#FAILED[@]}  -gt 0 ]] && echo -e "${RED}  Fehler:       ${BOLD}${#FAILED[@]}${NC}${RED} Site(s): ${FAILED[*]}${NC}"
 echo ""
+
+# Exit-Code für Cron/Cronicle: non-zero, wenn eine Site fehlschlug
+[[ ${#FAILED[@]} -eq 0 ]] && exit 0 || exit 1

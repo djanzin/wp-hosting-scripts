@@ -6,7 +6,7 @@
 #   bash check-dns.sh example.com
 #   bash check-dns.sh example.com --ip 1.2.3.4         # A-Record gegen erwartete IP prüfen
 #   bash check-dns.sh example.com shop.de blog.de      # mehrere Domains nacheinander
-#   bash check-dns.sh example.com --dkim xyz123        # SES-DKIM-Selektoren prüfen (Token)
+#   bash check-dns.sh example.com --dkim tok1,tok2,tok3  # SES-DKIM: 3 Tokens komma-getrennt
 #
 # Braucht 'dig' (paket: dnsutils / bind-utils). Läuft auch ohne root.
 
@@ -66,18 +66,24 @@ for DOMAIN in "${DOMAINS[@]}"; do
     DMARC=$(dig +short TXT "_dmarc.${DOMAIN}" | tr -d '"' | grep -i "v=DMARC1" | head -1)
     if [[ -n "$DMARC" ]]; then ok "DMARC: ${DMARC}"; else note "DMARC fehlt (_dmarc TXT v=DMARC1 …) — empfohlen"; fi
 
-    # SES-DKIM (3 CNAMEs <token>-1/2/3._domainkey → ...dkim.amazonses.com)
+    # SES-DKIM: SES Easy DKIM liefert DREI EIGENSTÄNDIGE Tokens, jedes als eigener
+    # CNAME <token>._domainkey.<domain> → <token>.dkim.amazonses.com
+    # (NICHT <token>-1/-2/-3). --dkim erwartet daher die 3 Tokens komma-getrennt.
     if [[ -n "$DKIM_TOKEN" ]]; then
-        DKIM_OK=0
-        for n in 1 2 3; do
-            SEL="${DKIM_TOKEN}-${n}._domainkey.${DOMAIN}"
+        IFS=',' read -ra DKIM_TOKS <<< "$DKIM_TOKEN"
+        DKIM_OK=0; DKIM_TOTAL=0
+        for tok in "${DKIM_TOKS[@]}"; do
+            tok=$(echo "$tok" | tr -d '[:space:]')
+            [[ -z "$tok" ]] && continue
+            DKIM_TOTAL=$((DKIM_TOTAL + 1))
+            SEL="${tok}._domainkey.${DOMAIN}"
             R=$(dig +short CNAME "$SEL" | head -1)
-            [[ -n "$R" ]] && DKIM_OK=$((DKIM_OK + 1))
+            [[ "$R" == *"dkim.amazonses.com"* ]] && DKIM_OK=$((DKIM_OK + 1))
         done
-        if [[ $DKIM_OK -eq 3 ]]; then ok "SES-DKIM: 3/3 CNAMEs gesetzt"
-        else bad "SES-DKIM: nur ${DKIM_OK}/3 CNAMEs"; PROBLEM=1; fi
+        if [[ $DKIM_TOTAL -gt 0 && $DKIM_OK -eq $DKIM_TOTAL ]]; then ok "SES-DKIM: ${DKIM_OK}/${DKIM_TOTAL} CNAMEs gesetzt"
+        else bad "SES-DKIM: nur ${DKIM_OK}/${DKIM_TOTAL} CNAMEs (SES liefert 3 eigenständige Tokens)"; PROBLEM=1; fi
     else
-        note "DKIM ungeprüft (kein --dkim TOKEN angegeben)"
+        note "DKIM ungeprüft (kein --dkim TOKEN,TOKEN,TOKEN angegeben)"
     fi
 
     if [[ $PROBLEM -eq 0 ]]; then READY=$((READY + 1)); else ISSUES=$((ISSUES + 1)); fi

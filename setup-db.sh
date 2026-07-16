@@ -327,8 +327,13 @@ IFS=',' read -ra VM_IPS <<< "$WEB_VM_IPS"
 for VM_IP in "${VM_IPS[@]}"; do
     VM_IP=$(echo "$VM_IP" | tr -d ' ')
     mysql -e "CREATE OR REPLACE USER '${ADMIN_USER}'@'${VM_IP}' IDENTIFIED BY '${ADMIN_PASS}';"
-    mysql -e "GRANT ALL PRIVILEGES ON *.* TO '${ADMIN_USER}'@'${VM_IP}' WITH GRANT OPTION;"
-    log "DB-Admin-User für ${VM_IP} angelegt"
+    # KEIN 'ALL ON *.*' — das schlösse FILE/SUPER/SHUTDOWN/PROCESS/REPLICATION ein und gäbe
+    # einer evtl. kompromittierten Web-VM OS-/Server-Zugriff auf die DB-VM. Stattdessen nur:
+    #  - die nötigen globalen Rechte (CREATE DATABASE, CREATE/DROP USER, FLUSH)
+    #  - die DB-Level-Rechte (identisch zum Site-User-Set), weitergebbar via GRANT OPTION
+    mysql -e "GRANT CREATE, CREATE USER, RELOAD ON *.* TO '${ADMIN_USER}'@'${VM_IP}';"
+    mysql -e "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE TEMPORARY TABLES, LOCK TABLES, EXECUTE, CREATE VIEW, SHOW VIEW, CREATE ROUTINE, ALTER ROUTINE, EVENT, TRIGGER ON *.* TO '${ADMIN_USER}'@'${VM_IP}' WITH GRANT OPTION;"
+    log "DB-Admin-User für ${VM_IP} angelegt (eingeschränkt — kein FILE/SUPER)"
 done
 mysql -e "FLUSH PRIVILEGES;"
 
@@ -386,6 +391,8 @@ else
 fi
 
 # ── Netdata ───────────────────────────────────────────────────────────────
+# Nur Agent-Install + Loopback-Bind. Parent-Child-Stream-Config kommt zentral über
+# proxmox-netdata (configure-netdata-child.sh). Loopback, damit :19999 nicht offen steht.
 if systemctl is-active --quiet netdata 2>/dev/null; then
     log "Netdata bereits installiert"
 else
@@ -393,7 +400,17 @@ else
     wget -qO /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh
     bash /tmp/netdata-kickstart.sh --non-interactive --stable-channel --disable-telemetry 2>&1 | tail -5 || true
     rm -f /tmp/netdata-kickstart.sh
-    log "Netdata installiert (Port 19999)"
+    log "Netdata installiert (Port 19999, Loopback)"
+fi
+# Web-UI strikt auf Loopback binden (idempotent) — minimales netdata.conf mergt mit Defaults
+if command -v netdata &>/dev/null && ! grep -qs "bind socket to IP = 127.0.0.1" /etc/netdata/netdata.conf; then
+    mkdir -p /etc/netdata
+    cat > /etc/netdata/netdata.conf <<'NDEOF'
+[web]
+    bind socket to IP = 127.0.0.1
+NDEOF
+    systemctl restart netdata 2>/dev/null || true
+    log "Netdata Web-UI auf 127.0.0.1 gebunden"
 fi
 
 # ── MariaDB Backup-Cron ────────────────────────────────────────────────────
@@ -479,6 +496,9 @@ if [[ \${ERRORS} -gt 0 ]] && [[ -n "\${WEBHOOK_URL:-}" ]]; then
     curl -fsS -G --data-urlencode "msg=\${MSG}" "\${WEBHOOK_URL}?status=down" \
         -o /dev/null 2>/dev/null || true
 fi
+
+# Mit Fehleranzahl beenden, damit Cron/Cronicle/Uptime einen kaputten Lauf erkennt
+exit "\${ERRORS}"
 BEOF
 chmod +x /usr/local/bin/mysql-backup.sh
 # flock verhindert parallele Läufe bei langlaufenden Dumps
@@ -489,15 +509,12 @@ log "MariaDB Backup-Cron konfiguriert (täglich 02:00, flock-protected → /var/
 mkdir -p /etc/wp-hosting /var/lib/wp-hosting/disk-state
 # DB-VM-lokale Config (nur WEBHOOK_URL nötig — disk-alert + mysql-backup-Cron).
 # Quotes: WEBHOOK_URL kann Sonderzeichen/Query-Params enthalten → sonst bricht das Sourcen.
-cat > /etc/wp-hosting/config <<CFGEOF
-WEBHOOK_URL="${WEBHOOK_URL:-}"
-CFGEOF
+# Wert shell-sicher serialisieren (printf %q) — Datei wird per `source` geladen.
+printf 'WEBHOOK_URL=%q\n' "${WEBHOOK_URL:-}" > /etc/wp-hosting/config
 chmod 600 /etc/wp-hosting/config
 
 # Config für manuelle Backup-Tools — db-backup.sh teilt sich diesen Remote mit Auto-Cron
-cat > /etc/wp-hosting/db-backup.conf <<DBCFGEOF
-RCLONE_DEST="${RCLONE_DEST}"
-DBCFGEOF
+printf 'RCLONE_DEST=%q\n' "${RCLONE_DEST}" > /etc/wp-hosting/db-backup.conf
 chmod 600 /etc/wp-hosting/db-backup.conf
 log "Manuelle Backup-Tool-Config: /etc/wp-hosting/db-backup.conf"
 

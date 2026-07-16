@@ -103,30 +103,14 @@ DB_ADMIN_PASS="${DB_ADMIN_PASS:-}"; ask_secret DB_ADMIN_PASS "DB-Admin-Passwort 
 # (admin_dany@<domain>). Dieses Feld ist daher optional (Alt-Wert, ungenutzt).
 WP_ADMIN_EMAIL="${WP_ADMIN_EMAIL:-}"; ask WP_ADMIN_EMAIL "Standard-Admin-E-Mail (optional, wird pro Site abgeleitet): "
 
-# NPM-IP: aus Config (NPM_IP) übernehmen, sonst Auto-Detection + Prompt.
-# Auto-Detection: erste IP im selben /24, die :81 (NPM-Admin) öffnet (Bash /dev/tcp).
+# Reverse-Proxy-IP (Caddy): aus Config (NPM_IP) übernehmen, sonst interaktiv erfragen.
+# Die Variable heißt aus Kompatibilitätsgründen weiter NPM_IP. Der frühere NPM lief
+# unter Port 81 (Auto-Detect); Caddy hat keinen solchen Admin-Port → kein Scan mehr.
 if [[ -z "${NPM_IP:-}" ]]; then
-    NPM_IP_GUESS=""
-    MY_IP=$(hostname -I | awk '{print $1}')
-    if [[ -n "$MY_IP" ]] && ! $NONINT; then
-        SUBNET="${MY_IP%.*}"
-        info "Suche NPM im Subnetz ${SUBNET}.0/24 (Port 81)..."
-        for i in $(seq 1 254); do
-            CANDIDATE="${SUBNET}.${i}"
-            [[ "$CANDIDATE" == "$MY_IP" ]] && continue
-            if timeout 0.3 bash -c "</dev/tcp/${CANDIDATE}/81" 2>/dev/null; then
-                NPM_IP_GUESS="$CANDIDATE"
-                break
-            fi
-        done
-    fi
     if $NONINT; then
         err "NPM_IP ist im --config-Modus Pflicht (IP des Reverse-Proxy/Caddy, z.B. 10.1.2.2) — sonst ist Real-IP kaputt und ufw sperrt den Proxy von phpMyAdmin/Filebrowser aus."
-    elif [[ -n "$NPM_IP_GUESS" ]]; then
-        read -rp "IP-Adresse des Nginx Proxy Managers (Vorschlag: ${NPM_IP_GUESS}): " NPM_IP
-        [[ -z "$NPM_IP" ]] && NPM_IP="$NPM_IP_GUESS"
     else
-        read -rp "IP-Adresse des Nginx Proxy Managers (für Real-IP): " NPM_IP
+        read -rp "IP-Adresse des Reverse-Proxy (Caddy, z.B. 10.1.2.2, für Real-IP): " NPM_IP
         [[ -z "$NPM_IP" ]] && NPM_IP="127.0.0.1"
     fi
 fi
@@ -279,8 +263,10 @@ if [[ -n "$RCLONE_REMOTE" ]]; then
     if command -v rclone &>/dev/null; then
         log "rclone bereits installiert ($(rclone --version 2>/dev/null | head -1))"
     else
-        curl -fsS https://rclone.org/install.sh | bash 2>&1 | tail -3
-        log "rclone installiert"
+        # paketsigniert via apt (Ubuntu-Repo) statt 'curl | bash' — Version genügt für R2/S3
+        apt-get install -y rclone 2>&1 | tail -3
+        command -v rclone &>/dev/null || err "rclone-Installation fehlgeschlagen (apt)."
+        log "rclone installiert ($(rclone --version 2>/dev/null | head -1))"
     fi
 
     mkdir -p /root/.config/rclone
@@ -395,9 +381,16 @@ fi
 
 # ── WP-CLI ────────────────────────────────────────────────────────────────
 curl -fsSL -o wp-cli.phar https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+# Integrität gegen offizielle SHA512 prüfen (wp-cli liefert wp-cli.phar.sha512)
+curl -fsSL -o wp-cli.phar.sha512 https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar.sha512
+if ! printf '%s  wp-cli.phar\n' "$(cat wp-cli.phar.sha512)" | sha512sum -c - >/dev/null 2>&1; then
+    rm -f wp-cli.phar wp-cli.phar.sha512
+    err "WP-CLI Download-Verifikation (SHA512) fehlgeschlagen."
+fi
+rm -f wp-cli.phar.sha512
 chmod +x wp-cli.phar
 mv wp-cli.phar /usr/local/bin/wp
-log "WP-CLI installiert"
+log "WP-CLI installiert (SHA512 verifiziert)"
 
 # ── PHP 8.3 konfigurieren ─────────────────────────────────────────────────
 PHP_INI="/etc/php/8.3/fpm/php.ini"
@@ -564,7 +557,7 @@ if [[ -z "$CF_IPS_V6" ]]; then
 fi
 
 {
-    echo "# Nginx Proxy Manager (interner Proxy)"
+    echo "# Reverse-Proxy (Caddy, interner Upstream)"
     echo "set_real_ip_from ${NPM_IP};"
     echo ""
     echo "# Cloudflare IPv4-Ranges (https://www.cloudflare.com/ips/)"
@@ -613,7 +606,18 @@ else
     PMA_VERSION=$(curl -sf https://www.phpmyadmin.net/home_page/version.txt | head -1 | tr -d '[:space:]')
     [[ -z "$PMA_VERSION" ]] && PMA_VERSION="5.2.2" && warn "phpMyAdmin-Version konnte nicht abgerufen werden — Fallback: 5.2.2"
     info "phpMyAdmin Version: ${PMA_VERSION}"
-    wget -q "https://files.phpmyadmin.net/phpMyAdmin/${PMA_VERSION}/phpMyAdmin-${PMA_VERSION}-all-languages.tar.gz" -O /tmp/pma.tar.gz
+    PMA_URL="https://files.phpmyadmin.net/phpMyAdmin/${PMA_VERSION}/phpMyAdmin-${PMA_VERSION}-all-languages.tar.gz"
+    wget -q "$PMA_URL" -O /tmp/pma.tar.gz
+    # Integrität prüfen — phpMyAdmin liefert .sha256 neben dem Tarball
+    if wget -q "${PMA_URL}.sha256" -O /tmp/pma.sha256 2>/dev/null && [[ -s /tmp/pma.sha256 ]]; then
+        PMA_EXP=$(awk '{print $1}' /tmp/pma.sha256)
+        PMA_ACT=$(sha256sum /tmp/pma.tar.gz | awk '{print $1}')
+        [[ "$PMA_EXP" == "$PMA_ACT" ]] || { rm -f /tmp/pma.tar.gz /tmp/pma.sha256; err "phpMyAdmin SHA256-Verifikation fehlgeschlagen."; }
+        rm -f /tmp/pma.sha256
+        info "phpMyAdmin SHA256 verifiziert"
+    else
+        warn "phpMyAdmin .sha256 nicht abrufbar — nur HTTPS-Transport-Integrität."
+    fi
     tar -xzf /tmp/pma.tar.gz -C /tmp/
     rm -rf "$PMA_DIR"
     mv "/tmp/phpMyAdmin-${PMA_VERSION}-all-languages" "$PMA_DIR"
@@ -874,6 +878,10 @@ else
 fi
 
 # ── Netdata ───────────────────────────────────────────────────────────────
+# Nur Agent-Install + Loopback-Bind. Die Parent-Child-Stream-Config wird bewusst
+# NICHT hier gesetzt, sondern zentral über das proxmox-netdata-Repo
+# (configure-netdata-child.sh) ausgerollt. Loopback-Bind, damit :19999 nicht im
+# VLAN offen steht (Streaming zum Parent ist outbound).
 if systemctl is-active --quiet netdata 2>/dev/null; then
     log "Netdata bereits installiert"
 else
@@ -881,7 +889,18 @@ else
     wget -qO /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh
     bash /tmp/netdata-kickstart.sh --non-interactive --stable-channel --disable-telemetry 2>&1 | tail -5 || true
     rm -f /tmp/netdata-kickstart.sh
-    log "Netdata installiert (Port 19999)"
+    log "Netdata installiert (Port 19999, Loopback)"
+fi
+# Web-UI strikt auf Loopback binden (idempotent). Ein minimales netdata.conf mergt mit
+# den compiled Defaults — nur der [web]-Bind wird überschrieben.
+if command -v netdata &>/dev/null && ! grep -qs "bind socket to IP = 127.0.0.1" /etc/netdata/netdata.conf; then
+    mkdir -p /etc/netdata
+    cat > /etc/netdata/netdata.conf <<'NDEOF'
+[web]
+    bind socket to IP = 127.0.0.1
+NDEOF
+    systemctl restart netdata 2>/dev/null || true
+    log "Netdata Web-UI auf 127.0.0.1 gebunden"
 fi
 
 # ── UFW ───────────────────────────────────────────────────────────────────
@@ -1050,6 +1069,9 @@ if [[ \${ERRORS} -gt 0 ]] && [[ -n "\${WEBHOOK_URL:-}" ]]; then
     curl -fsS -G --data-urlencode "msg=\${MSG}" "\${WEBHOOK_URL}?status=down" \
         -o /dev/null 2>/dev/null || true
 fi
+
+# Mit Fehleranzahl beenden, damit Cron/Cronicle/Uptime einen kaputten Lauf erkennt
+exit "\${ERRORS}"
 BACKUPEOF
 
 chmod +x /usr/local/bin/wp-backup-files.sh
@@ -1207,7 +1229,7 @@ CF_IPS_V6=$(curl -sf --max-time 10 https://www.cloudflare.com/ips-v6 || true)
 [[ -z "$CF_IPS_V4" || -z "$CF_IPS_V6" ]] && exit 0  # Abruf fehlgeschlagen – nichts überschreiben
 
 {
-    echo "# Nginx Proxy Manager (interner Proxy)"
+    echo "# Reverse-Proxy (Caddy, interner Upstream)"
     echo "set_real_ip_from ${NPM_IP};"
     echo ""
     echo "# Cloudflare IPv4-Ranges (https://www.cloudflare.com/ips/)"
@@ -1251,22 +1273,26 @@ fi
 # Konfiguration speichern
 mkdir -p /etc/wp-hosting/plugins
 
-cat > /etc/wp-hosting/config <<EOF
-VM_TYPE=${VM_TYPE}
-DB_HOST=${DB_HOST}
-DB_ADMIN_USER=${DB_ADMIN_USER}
-DB_ADMIN_PASS=${DB_ADMIN_PASS}
-WP_ADMIN_EMAIL=${WP_ADMIN_EMAIL}
-NPM_IP=${NPM_IP}
-WEBHOOK_URL=${WEBHOOK_URL:-}
-RCLONE_REMOTE=${RCLONE_REMOTE:-}
-RCLONE_DEST=${RCLONE_DEST:-}
-PLUGIN_BUCKET=${PLUGIN_BUCKET:-}
-THEME_BUCKET=${THEME_BUCKET:-}
-SEOPRESS_KEY=${SEOPRESS_KEY:-}
-MATOMO_URL=${MATOMO_URL:-}
-PMA_AUTH_PASS=${PMA_AUTH_PASS}
-EOF
+# Werte shell-sicher serialisieren (printf %q) — die Datei wird später per `source`
+# geladen; roh geschriebene Werte mit Leerzeichen/&/$/Anführungszeichen würden sonst
+# die Config zerbrechen oder Shell-Code einschleusen.
+{
+    printf 'VM_TYPE=%q\n'        "${VM_TYPE}"
+    printf 'DB_HOST=%q\n'        "${DB_HOST}"
+    printf 'DB_ADMIN_USER=%q\n'  "${DB_ADMIN_USER}"
+    printf 'DB_ADMIN_PASS=%q\n'  "${DB_ADMIN_PASS}"
+    printf 'WP_ADMIN_EMAIL=%q\n' "${WP_ADMIN_EMAIL}"
+    printf 'NPM_IP=%q\n'         "${NPM_IP}"
+    printf 'WEBHOOK_URL=%q\n'    "${WEBHOOK_URL:-}"
+    printf 'RCLONE_REMOTE=%q\n'  "${RCLONE_REMOTE:-}"
+    printf 'RCLONE_DEST=%q\n'    "${RCLONE_DEST:-}"
+    printf 'PLUGIN_BUCKET=%q\n'  "${PLUGIN_BUCKET:-}"
+    printf 'THEME_BUCKET=%q\n'   "${THEME_BUCKET:-}"
+    printf 'SEOPRESS_KEY=%q\n'   "${SEOPRESS_KEY:-}"
+    printf 'MATOMO_URL=%q\n'     "${MATOMO_URL:-}"
+    printf 'PMA_AUTH_PASS=%q\n'  "${PMA_AUTH_PASS}"
+} > /etc/wp-hosting/config
+chmod 600 /etc/wp-hosting/config   # enthält DB-Admin-Passwort
 chmod 600 /etc/wp-hosting/config
 
 # ── Services starten ──────────────────────────────────────────────────────

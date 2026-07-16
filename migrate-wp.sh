@@ -28,6 +28,7 @@ echo -e "${NC}"
 read -rp "Ziel-Domain auf diesem Server (z.B. meinshop.de): " DOMAIN
 DOMAIN=$(echo "$DOMAIN" | tr '[:upper:]' '[:lower:]' | sed 's/^www\.//')
 [[ -z "$DOMAIN" ]] && err "Domain darf nicht leer sein."
+[[ ! "$DOMAIN" =~ ^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$ ]] && err "Ungültige Domain: ${DOMAIN}"
 [[ -d "/var/www/${DOMAIN}" ]] && err "Site '${DOMAIN}' existiert bereits."
 
 echo ""
@@ -218,7 +219,9 @@ wp redis enable --path="$SITE_PATH" --allow-root 2>/dev/null || true
 
 # ── Systemuser + Berechtigungen ───────────────────────────────────────────
 useradd -r -s /sbin/nologin -d "$SITE_PATH" "$SYSTEM_USER" 2>/dev/null || true
-chown -R "${SYSTEM_USER}:www-data" "$SITE_PATH"
+# Mandantentrennung (wie install-wp): eigene Site-Gruppe, www-data (nginx) darf lesen
+usermod -aG "$SYSTEM_USER" www-data
+chown -R "${SYSTEM_USER}:${SYSTEM_USER}" "$SITE_PATH"
 find "$SITE_PATH" -type d -exec chmod 750 {} \;
 find "$SITE_PATH" -type f -exec chmod 640 {} \;
 chmod 600 "${SITE_PATH}/wp-config.php"
@@ -244,7 +247,7 @@ fi
 cat > "/etc/php/8.3/fpm/pool.d/${DOMAIN}.conf" <<EOF
 [${DOMAIN}]
 user  = ${SYSTEM_USER}
-group = www-data
+group = ${SYSTEM_USER}
 listen = /run/php/php8.3-fpm-${DOMAIN}.sock
 listen.owner = www-data
 listen.group = www-data
@@ -319,6 +322,8 @@ server {
     }
 
     location ~ /\.(ht|git|env) { deny all; }
+    location ~ /(wp-config\.php|readme\.html|license\.txt|wp-config-sample\.php)\$ { deny all; }
+    location ~* /(?:uploads|files)/.*\.php\$ { deny all; }
     location = /xmlrpc.php     { deny all; }
     location = /wp-login.php   { limit_req zone=login burst=3 nodelay; include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
 }
@@ -369,6 +374,8 @@ server {
     }
 
     location ~ /\.(ht|git|env) { deny all; }
+    location ~ /(wp-config\.php|readme\.html|license\.txt|wp-config-sample\.php)\$ { deny all; }
+    location ~* /(?:uploads|files)/.*\.php\$ { deny all; }
     location = /xmlrpc.php     { deny all; }
     location = /wp-login.php   { limit_req zone=login burst=3 nodelay; include snippets/fastcgi-php.conf; fastcgi_pass unix:${SOCK}; include fastcgi_params; }
 }
@@ -377,12 +384,13 @@ fi
 ln -sf "/etc/nginx/sites-available/${DOMAIN}" "/etc/nginx/sites-enabled/${DOMAIN}"
 
 # ── WP-Cron ───────────────────────────────────────────────────────────────
-echo "*/5 * * * * ${SYSTEM_USER} /usr/local/bin/wp --path=${SITE_PATH} cron event run --due-now --allow-root 2>/dev/null" \
-    > "/etc/cron.d/wpcron-${DOMAIN_SAFE}"
-chmod 644 "/etc/cron.d/wpcron-${DOMAIN_SAFE}"
+# Kein lokaler System-Cron (konsistent mit install-wp): DISABLE_WP_CRON bleibt gesetzt,
+# der WP-Cron wird zentral über provision-endpoint.sh in Cronicle angelegt. Für die
+# migrierte Domain muss der Cronicle-Event separat angelegt werden.
+info "WP-Cron: kein lokaler Cron — zentral via Cronicle (provision-endpoint.sh) für ${DOMAIN} anlegen"
 
 # ── Services neu laden ────────────────────────────────────────────────────
-nginx -t && systemctl reload nginx
+nginx -t && systemctl restart nginx   # restart: www-data übernimmt die neue Site-Gruppe
 systemctl reload php8.3-fpm
 log "Services neu geladen"
 
@@ -416,7 +424,7 @@ mkdir -p "${SFTP_CHROOT}"
 chown root:root "${SFTP_CHROOT}"
 chmod 755 "${SFTP_CHROOT}"
 mkdir -p "${SFTP_CHROOT}/site"
-chown "${SYSTEM_USER}:www-data" "${SFTP_CHROOT}/site"
+chown "${SYSTEM_USER}:${SYSTEM_USER}" "${SFTP_CHROOT}/site"
 chmod 750 "${SFTP_CHROOT}/site"
 
 if ! mountpoint -q "${SFTP_CHROOT}/site"; then
@@ -429,8 +437,25 @@ fi
 log "SFTP Chroot eingerichtet: ${SFTP_CHROOT}"
 
 # ── Maintenance Mode aktivieren ───────────────────────────────────────────
+# Maintenance-mu-Plugin installieren — sonst wäre das .maintenance-active-Flag wirkungslos
+# (konsistent mit install-wp; schlanke Variante ohne die gestylte HTML-Seite).
+mkdir -p "${SITE_PATH}/wp-content/mu-plugins"
+cat > "${SITE_PATH}/wp-content/mu-plugins/maintenance-mode.php" <<'MUPLUGIN'
+<?php
+// Maintenance Mode (Flag: wp-content/.maintenance-active), Login/Admin-Bypass
+$_f = dirname(__FILE__) . '/../.maintenance-active';
+if (!file_exists($_f)) return;
+if (isset($_SERVER['REQUEST_URI']) && strpos($_SERVER['REQUEST_URI'], 'wp-login.php') !== false) return;
+foreach (array_keys($_COOKIE) as $_k) { if (strpos($_k, 'wordpress_logged_in_') === 0) return; }
+http_response_code(503);
+header('Retry-After: 3600');
+header('Content-Type: text/html; charset=UTF-8');
+echo '<!doctype html><meta charset="utf-8"><title>Wartung</title><h1>Wartungsarbeiten</h1><p>Diese Seite ist kurzzeitig nicht verfügbar. Bitte in Kürze erneut versuchen.</p>';
+MUPLUGIN
+chown "${SYSTEM_USER}:${SYSTEM_USER}" "${SITE_PATH}/wp-content/mu-plugins/maintenance-mode.php"
+
 touch "${SITE_PATH}/wp-content/.maintenance-active"
-chown "${SYSTEM_USER}:www-data" "${SITE_PATH}/wp-content/.maintenance-active"
+chown "${SYSTEM_USER}:${SYSTEM_USER}" "${SITE_PATH}/wp-content/.maintenance-active"
 chmod 640 "${SITE_PATH}/wp-content/.maintenance-active"
 log "Maintenance Mode aktiviert"
 

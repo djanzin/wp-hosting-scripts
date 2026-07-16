@@ -39,7 +39,7 @@ und Filebrowser-User** — sauber voneinander isoliert.
 ## Architektur
 
 ```
-Internet → Cloudflare → Nginx Proxy Manager (SSL + Authentik-OIDC für MainWP)
+Internet → Cloudflare → Caddy (SSL + Authentik-OIDC für MainWP)
                                 ↓ HTTP intern
         ┌──────────────────┬──────────────────┬──────────────────┐
    Web-VM 1            Web-VM 2           MainWP-VM
@@ -159,7 +159,7 @@ curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/se
 sudo bash setup-web.sh
 ```
 
-Fragt nach: VM-Typ, DB-VM-IP, DB-Zugangsdaten, Admin-E-Mail, NPM-IP, Webhook-URL, SEOpress-Key, Remote-Backup-Ziel.
+Fragt nach: VM-Typ, DB-VM-IP, DB-Zugangsdaten, Admin-E-Mail, Reverse-Proxy-IP (Caddy, Config-Key `NPM_IP`), Webhook-URL, SEOpress-Key, Remote-Backup-Ziel.
 
 > **Reproduzierbar/non-interaktiv:** `setup-web.conf.example` kopieren, ausfüllen, dann
 > `sudo bash setup-web.sh --config setup-web.conf`. Alle gesetzten Werte werden nicht
@@ -178,7 +178,7 @@ sudo bash install-wp.sh
 ```
 
 Fragt nach Domain und Typ (WordPress oder WooCommerce).
-Danach NPM Proxy-Host anlegen: `https://domain.de → http://<WEB-VM-IP>:80`
+Danach Endpunkt provisionieren (`provision-endpoint.sh` im privaten `homelab-provisioning`): legt den Caddy-Block `https://domain.de → http://<WEB-VM-IP>:80` an, Cloudflare-DNS, Cronicle-WP-Cron und Matomo.
 
 > **SEOpress Pro:** Lade die ZIP einmal nach `r2:wp-plugins/seopress-pro.zip` hoch (oder welcher Plugin-Bucket bei Setup angegeben wurde). Beim ersten `setup-web.sh`-Lauf wird sie automatisch nach `/etc/wp-hosting/plugins/` synchronisiert. Spätere Updates: ZIP in R2 ersetzen, dann `sudo bash sync-plugins.sh`.
 
@@ -212,7 +212,7 @@ Für die zentrale Verwaltung aller Child-Sites lohnt sich eine eigene
 WordPress-VM:
 - **1536M PHP-Memory** für Sync mit vielen Child-Sites
 - **Reduzierter Plugin-Stack** (keine SEO/Cookie/Antispam-Plugins für eine reine Admin-Site)
-- **Eigene Auth-Schicht** via NPMPlus Forward-Auth zu Authentik (kein public-erreichbares wp-login)
+- **Eigene Auth-Schicht** via Caddy Forward-Auth zu Authentik (kein public-erreichbares wp-login)
 
 ### Setup (kompakte Variante)
 
@@ -234,9 +234,9 @@ sudo bash install-wp.sh --domain mainwp.example.com --type mainwp --yes
 
 Nach Upload neuer ZIP-Versionen: `sudo bash sync-plugins.sh --plugins`
 
-### NPMPlus Proxy-Host mit Authentik Forward-Auth
+### Caddy Proxy-Host mit Authentik Forward-Auth
 
-In NPMPlus für die MainWP-Domain einen Proxy-Host anlegen:
+In Caddy für die MainWP-Domain einen Proxy-Host anlegen:
 - Domain: `mainwp.example.com`
 - Forward zu: `http://<MainWP-VM-IP>:80`
 - SSL: Let's Encrypt aktivieren
@@ -315,7 +315,7 @@ Kein Blocksy, kein WooCommerce, kein MainWP Child auf der Dashboard-Site selbst.
 - `WP_MEMORY_LIMIT 256M` / `WP_MAX_MEMORY_LIMIT 512M`
 - `WP_POST_REVISIONS 5`, `EMPTY_TRASH_DAYS 7`, `AUTOSAVE_INTERVAL 120`
 - `WP_CACHE true` (FastCGI + Redis Object Cache)
-- X-Forwarded-Proto-Fix für HTTPS hinter NPM
+- X-Forwarded-Proto-Fix für HTTPS hinter Caddy
 
 ### Plugins (automatisch installiert & konfiguriert)
 | Plugin | Zweck |
@@ -535,7 +535,7 @@ sudo bash maintenance.sh
 ## Voraussetzungen
 
 - Proxmox VE 8.x
-- Nginx Proxy Manager (SSL-Terminierung)
+- Caddy (SSL-Terminierung)
 - Cloudflare (empfohlen, für Real-IP-Header)
 - VMs können sich gegenseitig per IP erreichen
 - Für Webhooks: Uptime Kuma Push Monitor URL (`https://…/api/push/<key>`)

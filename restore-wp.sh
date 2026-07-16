@@ -114,14 +114,18 @@ if $RESTORE_DB; then
 
     case "$db_choice" in
         1)
+            # DB-Backups entstehen laut Architektur auf der DB-VM (mysql-backup.sh) bzw.
+            # liegen in R2 — lokal auf der Web-VM existiert /var/backups/mysql meist NICHT.
+            # Nur DOMAIN-spezifisch suchen — kein Blind-Fallback auf *.sql.gz
+            # (der könnte einen --all-databases-Dump o.ä. erwischen).
             DB_BACKUPS=()
             while IFS= read -r f; do
                 DB_BACKUPS+=("$f")
-            done < <(ls -t /var/backups/mysql/${DB_NAME}_*.sql.gz /var/backups/mysql/${DB_NAME}_*.sql.gz.age 2>/dev/null || \
-                     ls -t /var/backups/mysql/*.sql.gz /var/backups/mysql/*.sql.gz.age 2>/dev/null || true)
+            done < <(ls -t "/var/backups/mysql/${DB_NAME}_"*.sql.gz "/var/backups/mysql/${DB_NAME}_"*.sql.gz.age 2>/dev/null || true)
 
             if [[ ${#DB_BACKUPS[@]} -eq 0 ]]; then
-                warn "Keine DB-Backups gefunden in /var/backups/mysql/"
+                warn "Keine DB-Backups für '${DB_NAME}' in /var/backups/mysql/ gefunden."
+                warn "DB-Backups liegen i.d.R. auf der DB-VM oder in R2 — von dort holen und via Option 2 (manueller Pfad) einspielen."
                 RESTORE_DB=false
             else
                 echo "Verfügbare DB-Backups:"
@@ -213,37 +217,59 @@ fi
 if $RESTORE_DB && [[ -n "$SQL_FILE" ]]; then
     info "Datenbank wird wiederhergestellt aus: $(basename "$SQL_FILE")"
 
-    # Tabellen leeren (nicht DB droppen — User-Rechte bleiben erhalten)
+    # Pre-Restore-Snapshot der aktuellen DB (für Auto-Rollback bei Import-Fehler)
+    DB_ROLLBACK_DIR="/var/backups/wp-restore-rollback"
+    DB_ROLLBACK="${DB_ROLLBACK_DIR}/${DB_NAME}_$(date +%Y%m%d%H%M%S).sql.gz"
+    mkdir -p "$DB_ROLLBACK_DIR"; chmod 700 "$DB_ROLLBACK_DIR"
+    info "Sichere aktuelle DB vor Import → ${DB_ROLLBACK}"
+    if ! mysqldump -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" \
+            --single-transaction --quick "$DB_NAME" 2>/dev/null | gzip > "$DB_ROLLBACK"; then
+        rm -f "$DB_ROLLBACK"
+        err "Pre-Restore-Snapshot der DB fehlgeschlagen — Import abgebrochen (DB unverändert)."
+    fi
+
+    # Import-Helfer: entschlüsselt/entpackt je nach Endung, spielt in die DB
+    _db_import() {
+        if [[ "$SQL_FILE" == *.age ]]; then
+            local AGE_KEY="/etc/wp-hosting/backup-key.txt"
+            [[ ! -f "$AGE_KEY" ]] && { warn "backup-key.txt fehlt"; return 1; }
+            command -v age &>/dev/null || { warn "age nicht installiert"; return 1; }
+            age -d -i "$AGE_KEY" "$SQL_FILE" | zcat | \
+                mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME"
+        elif [[ "$SQL_FILE" == *.gz ]]; then
+            zcat "$SQL_FILE" | mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME"
+        else
+            mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME" < "$SQL_FILE"
+        fi
+    }
+
+    # Tabellen leeren (nicht DB droppen — User-Rechte bleiben erhalten).
+    # Fehler NICHT schlucken: bei Problemen abbrechen, DB ist noch unverändert.
     TABLES=$(mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" \
         -e "SELECT table_name FROM information_schema.tables WHERE table_schema='${DB_NAME}';" \
         --skip-column-names 2>/dev/null || echo "")
-
     if [[ -n "$TABLES" ]]; then
-        # Drop-Statements robust per stdin pipen (vermeidet awk/bash Backtick-Eskapierung)
-        {
-            echo "SET FOREIGN_KEY_CHECKS=0;"
-            while IFS= read -r tbl; do
-                [[ -n "$tbl" ]] && printf 'DROP TABLE IF EXISTS `%s`;\n' "$tbl"
-            done <<< "$TABLES"
-            echo "SET FOREIGN_KEY_CHECKS=1;"
-        } | mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME" 2>/dev/null || true
+        DROP_SQL=$( { echo "SET FOREIGN_KEY_CHECKS=0;"; \
+            while IFS= read -r tbl; do [[ -n "$tbl" ]] && printf 'DROP TABLE IF EXISTS `%s`;\n' "$tbl"; done <<< "$TABLES"; \
+            echo "SET FOREIGN_KEY_CHECKS=1;"; } )
+        if ! printf '%s\n' "$DROP_SQL" | mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME"; then
+            err "Tabellen konnten nicht geleert werden — Import abgebrochen (DB unverändert, Snapshot: ${DB_ROLLBACK})."
+        fi
     fi
 
-    # Import — age-verschlüsselt? → entschlüsseln
-    if [[ "$SQL_FILE" == *.age ]]; then
-        AGE_KEY="/etc/wp-hosting/backup-key.txt"
-        [[ ! -f "$AGE_KEY" ]] && err "Verschlüsselter SQL-Dump, aber ${AGE_KEY} fehlt."
-        command -v age &>/dev/null || err "age nicht installiert."
-        info "SQL-Dump wird entschlüsselt..."
-        age -d -i "$AGE_KEY" "$SQL_FILE" | zcat | \
-            mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME"
-    elif [[ "$SQL_FILE" == *.gz ]]; then
-        zcat "$SQL_FILE" | mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME"
+    # Import — bei Fehler DB aus Pre-Restore-Snapshot zurückrollen
+    if _db_import; then
+        log "Datenbank wiederhergestellt: ${DB_NAME}"
+        info "Pre-Restore-Snapshot bleibt vorhanden: ${DB_ROLLBACK}"
     else
-        mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME" < "$SQL_FILE"
+        warn "Import fehlgeschlagen — DB wird aus Pre-Restore-Snapshot zurückgerollt..."
+        if { echo "SET FOREIGN_KEY_CHECKS=0;"; zcat "$DB_ROLLBACK"; echo "SET FOREIGN_KEY_CHECKS=1;"; } | \
+                mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" "$DB_NAME"; then
+            err "Import fehlgeschlagen, DB erfolgreich zurückgerollt (Stand vor Restore wiederhergestellt)."
+        else
+            err "Import UND Rollback fehlgeschlagen — DB möglicherweise inkonsistent. Snapshot: ${DB_ROLLBACK}"
+        fi
     fi
-
-    log "Datenbank wiederhergestellt: ${DB_NAME}"
 fi
 
 # ── Caches leeren ─────────────────────────────────────────────────────────

@@ -135,7 +135,12 @@ fi
 # Ergebnis
 $QUIET || echo ""
 TOTAL=$((OK + FAILED))
-if [[ $FAILED -eq 0 ]]; then
+if [[ $TOTAL -eq 0 ]]; then
+    # Keine Backups gefunden ist KEIN Erfolg — meist fehlender Backup-Lauf/falsches Verzeichnis
+    $QUIET || echo -e "${RED}Keine Backups gefunden — nichts zu verifizieren (verdächtig!)${NC}"
+    STATUS="down"
+    MSG="Backup-Verify FEHLER: keine Backups gefunden (${FILES_DIR}, ${DB_DIR})"
+elif [[ $FAILED -eq 0 ]]; then
     $QUIET || echo -e "${GREEN}${TOTAL}/${TOTAL} Backups OK${NC}"
     STATUS="up"
     MSG="Backup-Verify: ${OK} Backups OK"
@@ -155,4 +160,4 @@ if [[ -n "${WEBHOOK_URL:-}" ]] && { [[ "$STATUS" == "down" ]] || $NOTIFY; }; the
         -o /dev/null 2>/dev/null || true
 fi
 
-[[ $FAILED -eq 0 ]] && exit 0 || exit 1
+[[ "$STATUS" == "up" ]] && exit 0 || exit 1

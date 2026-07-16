@@ -300,11 +300,17 @@ trap cleanup_on_error ERR
 if ! id "$SYSTEM_USER" &>/dev/null; then
     useradd -r -s /sbin/nologin -d "$SITE_PATH" "$SYSTEM_USER"
 fi
+# Mandantentrennung: jede Site hat eine eigene Gruppe (= Username). Der PHP-FPM-Worker
+# läuft als ${SYSTEM_USER}:${SYSTEM_USER} → PHP-Prozesse anderer Sites (fremde Gruppe)
+# können die Dateien dieser Site nicht lesen. Damit nginx (www-data) die statischen
+# Dateien trotzdem ausliefern kann, kommt www-data in die Site-Gruppe (nginx-RESTART
+# unten übernimmt die neue Gruppenmitgliedschaft).
+usermod -aG "$SYSTEM_USER" www-data
 log "Systemuser: ${SYSTEM_USER}"
 
 # ── Site-Verzeichnis ──────────────────────────────────────────────────────
 mkdir -p "${SITE_PATH}"
-chown "${SYSTEM_USER}:www-data" "${SITE_PATH}"
+chown "${SYSTEM_USER}:${SYSTEM_USER}" "${SITE_PATH}"
 chmod 750 "${SITE_PATH}"
 log "Verzeichnis: ${SITE_PATH}"
 
@@ -318,7 +324,7 @@ if [[ "$SITE_TYPE" == "mainwp" ]]; then
     cat > "$PHP_POOL" <<EOF
 [${DOMAIN}]
 user  = ${SYSTEM_USER}
-group = www-data
+group = ${SYSTEM_USER}
 
 listen = /run/php/php8.3-fpm-${DOMAIN}.sock
 listen.owner = www-data
@@ -357,7 +363,7 @@ elif [[ "$SITE_TYPE" == "woocommerce" ]]; then
     cat > "$PHP_POOL" <<EOF
 [${DOMAIN}]
 user  = ${SYSTEM_USER}
-group = www-data
+group = ${SYSTEM_USER}
 
 listen = /run/php/php8.3-fpm-${DOMAIN}.sock
 listen.owner = www-data
@@ -398,7 +404,7 @@ else
     cat > "$PHP_POOL" <<EOF
 [${DOMAIN}]
 user  = ${SYSTEM_USER}
-group = www-data
+group = ${SYSTEM_USER}
 
 listen = /run/php/php8.3-fpm-${DOMAIN}.sock
 listen.owner = www-data
@@ -758,7 +764,7 @@ log "Nginx Vhost erstellt"
 mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASS" <<SQL
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'$(hostname -I | awk '{print $1}')' IDENTIFIED BY '${DB_PASS}';
-GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'$(hostname -I | awk '{print $1}')';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE TEMPORARY TABLES, LOCK TABLES, EXECUTE, CREATE VIEW, SHOW VIEW, CREATE ROUTINE, ALTER ROUTINE, EVENT, TRIGGER ON \`${DB_NAME}\`.* TO '${DB_USER}'@'$(hostname -I | awk '{print $1}')';
 FLUSH PRIVILEGES;
 SQL
 log "Datenbank angelegt: ${DB_NAME}"
@@ -1444,7 +1450,7 @@ log "Must-Use Plugin: Maintenance Mode erstellt"
 log "WP-Cron: wird zentral in Cronicle angelegt (provision-endpoint.sh) — kein lokaler Cron"
 
 # ── Berechtigungen setzen ─────────────────────────────────────────────────
-chown -R "${SYSTEM_USER}:www-data" "$SITE_PATH"
+chown -R "${SYSTEM_USER}:${SYSTEM_USER}" "$SITE_PATH"
 find "$SITE_PATH" -type d -exec chmod 750 {} \;
 find "$SITE_PATH" -type f -exec chmod 640 {} \;
 chmod 600 "${SITE_PATH}/wp-config.php"
@@ -1452,14 +1458,16 @@ log "Berechtigungen gesetzt"
 
 # ── Maintenance Mode aktivieren ───────────────────────────────────────────
 touch "${SITE_PATH}/wp-content/.maintenance-active"
-chown "${SYSTEM_USER}:www-data" "${SITE_PATH}/wp-content/.maintenance-active"
+chown "${SYSTEM_USER}:${SYSTEM_USER}" "${SITE_PATH}/wp-content/.maintenance-active"
 chmod 640 "${SITE_PATH}/wp-content/.maintenance-active"
 log "Maintenance Mode aktiviert (→ sudo bash maintenance.sh zum Freischalten)"
 
 # ── Services neu laden ────────────────────────────────────────────────────
-nginx -t && systemctl reload nginx
+# restart (nicht reload): nginx-Master muss neu starten, damit der www-data-Worker die
+# frisch hinzugefügte Site-Gruppenmitgliedschaft (usermod -aG oben) übernimmt.
+nginx -t && systemctl restart nginx
 systemctl reload php8.3-fpm
-log "Nginx und PHP-FPM neu geladen"
+log "Nginx neu gestartet (Gruppenübernahme) und PHP-FPM neu geladen"
 
 # ── Filebrowser User anlegen ─────────────────────────────────────────────
 FB_DB="/etc/filebrowser/database.db"
@@ -1503,7 +1511,7 @@ chmod 755 "${SFTP_CHROOT}"
 
 # site/-Unterverzeichnis als Bind-Mount-Ziel
 mkdir -p "${SFTP_CHROOT}/site"
-chown "${SYSTEM_USER}:www-data" "${SFTP_CHROOT}/site"
+chown "${SYSTEM_USER}:${SYSTEM_USER}" "${SFTP_CHROOT}/site"
 chmod 750 "${SFTP_CHROOT}/site"
 
 # Bind-Mount (idempotent)

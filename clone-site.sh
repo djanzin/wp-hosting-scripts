@@ -67,12 +67,14 @@ WEB_VM_IP=$(hostname -I | awk '{print $1}')
 
 # ── Systemuser anlegen ────────────────────────────────────────────────────
 useradd -r -s /sbin/nologin -d "$DST_PATH" "$DST_SYSTEM_USER" 2>/dev/null || true
+# Mandantentrennung (wie install-wp): eigene Site-Gruppe, www-data (nginx) darf lesen
+usermod -aG "$DST_SYSTEM_USER" www-data
 log "Systemuser: ${DST_SYSTEM_USER}"
 
 # ── Dateien kopieren ──────────────────────────────────────────────────────
 info "Dateien werden kopiert..."
 cp -a "$SRC_PATH" "$DST_PATH"
-chown -R "${DST_SYSTEM_USER}:www-data" "$DST_PATH"
+chown -R "${DST_SYSTEM_USER}:${DST_SYSTEM_USER}" "$DST_PATH"
 log "Dateien kopiert: ${SRC_PATH} → ${DST_PATH}"
 
 # ── Datenbank klonen ──────────────────────────────────────────────────────
@@ -131,12 +133,13 @@ if [[ -f "$SRC_VHOST" ]]; then
 fi
 
 # ── WP-Cron ───────────────────────────────────────────────────────────────
-echo "*/5 * * * * ${DST_SYSTEM_USER} /usr/local/bin/wp --path=${DST_PATH} cron event run --due-now --allow-root 2>/dev/null" \
-    > "/etc/cron.d/wpcron-${DST_SAFE}"
-chmod 644 "/etc/cron.d/wpcron-${DST_SAFE}"
+# Kein lokaler System-Cron (konsistent mit install-wp): DISABLE_WP_CRON bleibt gesetzt,
+# der WP-Cron wird zentral über provision-endpoint.sh in Cronicle angelegt. Für die
+# geklonte Domain muss der Cronicle-Event separat angelegt werden.
+info "WP-Cron: kein lokaler Cron — zentral via Cronicle (provision-endpoint.sh) für die neue Domain anlegen"
 
 # ── Services neu laden ────────────────────────────────────────────────────
-nginx -t && systemctl reload nginx
+nginx -t && systemctl restart nginx   # restart: www-data übernimmt die neue Site-Gruppe
 systemctl reload php8.3-fpm
 log "Services neu geladen"
 
@@ -171,7 +174,7 @@ mkdir -p "${SFTP_CHROOT}"
 chown root:root "${SFTP_CHROOT}"
 chmod 755 "${SFTP_CHROOT}"
 mkdir -p "${SFTP_CHROOT}/site"
-chown "${DST_SYSTEM_USER}:www-data" "${SFTP_CHROOT}/site"
+chown "${DST_SYSTEM_USER}:${DST_SYSTEM_USER}" "${SFTP_CHROOT}/site"
 chmod 750 "${SFTP_CHROOT}/site"
 
 if ! mountpoint -q "${SFTP_CHROOT}/site"; then
@@ -185,7 +188,7 @@ log "SFTP Chroot eingerichtet: ${SFTP_CHROOT}"
 
 # ── Maintenance Mode aktivieren ───────────────────────────────────────────
 touch "${DST_PATH}/wp-content/.maintenance-active"
-chown "${DST_SYSTEM_USER}:www-data" "${DST_PATH}/wp-content/.maintenance-active"
+chown "${DST_SYSTEM_USER}:${DST_SYSTEM_USER}" "${DST_PATH}/wp-content/.maintenance-active"
 chmod 640 "${DST_PATH}/wp-content/.maintenance-active"
 log "Maintenance Mode aktiviert"
 

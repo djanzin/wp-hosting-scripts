@@ -238,3 +238,7 @@ if [[ -n "${WEBHOOK_URL:-}" ]] && \
         log "Webhook-Alert gesendet" || warn "Webhook fehlgeschlagen"
     echo ""
 fi
+
+# Exit-Code für Cron/Cronicle/Uptime: non-zero, wenn Probleme gefunden wurden
+if [[ ${#SITE_ISSUES[@]} -gt 0 || ${#INFRA_ISSUES[@]} -gt 0 ]]; then exit 1; fi
+exit 0
