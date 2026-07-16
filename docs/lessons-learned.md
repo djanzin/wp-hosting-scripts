@@ -119,3 +119,42 @@ timing-abhängig: nur die VM, deren dpkg-Commit gerade lief, war betroffen.)
 **Regel:** Frische cloud-init-VMs nicht hart neu starten, solange cloud-init/
 unattended-upgrades laufen können — Specs vor dem Boot festlegen. Jedes Skript, das
 apt nutzt, heilt dpkg und wartet auf den Lock.
+
+## 2026-07-16 · Request-abfangende Drop-ins/mu-Plugins müssen CLI + Cron ausnehmen
+
+**Symptom:** Nach `install-wp` gibt jeder wp-cli-Aufruf auf der Site die HTML-
+Wartungsseite zurück statt eines Ergebnisses (`wp plugin list` → `<!DOCTYPE html>`).
+Damit sind alle wp-cli-basierten Wartungsskripte (update-wp, db-cleanup, health-check,
+rotate-keys, reset-wp-admin) auf einer Site im Maintenance-Mode unbrauchbar.
+
+**Ursache:** Das `maintenance-mode.php`-mu-Plugin fing den Request ab (Flag gesetzt),
+prüfte aber nur wp-login + Login-Cookie — nicht den **CLI-/Cron-Kontext**. Da eine
+frische Site nach install *immer* im Maintenance-Mode steht, traf das jeden wp-cli-Lauf.
+
+**Fix:** Ganz oben im mu-Plugin:
+```php
+if ( ( defined( 'WP_CLI' ) && WP_CLI ) || ( defined( 'DOING_CRON' ) && DOING_CRON ) ) {
+    return;
+}
+```
+
+**Regel:** Jedes Drop-in/mu-Plugin, das Requests abfängt oder umleitet (Maintenance,
+Redirects, Auth-Gates), MUSS `WP_CLI` und `DOING_CRON` früh ausnehmen.
+
+## 2026-07-16 · Plugin-Aktivierung, die plugins_api() aufruft, unter wp-cli trennen
+
+**Symptom:** `wp plugin install <zip> --activate` bricht mit `PHP Fatal error:
+Cannot redeclare plugins_api()` ab (das Plugin wird zwar aktiv, aber der Log ist
+verschmutzt und ein `[✓]`-Log danach ist irreführend). Beobachtet bei PostX Pro
+(`ultimate-post-pro`).
+
+**Ursache:** wp-cli lädt für den `install`-Teil `wp-admin/includes/plugin-install.php`.
+Der Aktivierungs-Hook des Plugins ruft `plugins_api()` auf und lädt dieselbe Datei per
+`require` erneut → Doppel-Deklaration, im selben Prozess.
+
+**Fix:** Install und Aktivierung in **getrennte** wp-cli-Aufrufe splitten
+(`wp plugin install <zip>` ohne `--activate`, danach `wp plugin activate <slug>`). Im
+reinen activate-Prozess ist `plugin-install.php` nicht vorgeladen.
+
+**Regel:** Plugins, deren Aktivierungs-Hook `plugins_api()`/Update-APIs anfasst,
+nie mit `install --activate` in einem Zug installieren — Schritte trennen.

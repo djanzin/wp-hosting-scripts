@@ -997,8 +997,15 @@ fi
 if [[ "$SITE_TYPE" == "wordpress" ]]; then
     # PostX Pro — Tech-Blog-Blocks (Reviews, Comparison-Tables, Query Loops)
     if [[ -f "${PLUGINS_DIR}/postxpro.zip" ]]; then
+        # Install und Aktivierung TRENNEN: PostX' Aktivierungs-Hook ruft plugins_api()
+        # auf und lädt dabei wp-admin/includes/plugin-install.php erneut. Läuft das im
+        # selben wp-cli-Prozess wie "plugin install --activate" (der die Datei bereits
+        # geladen hat), gibt es "Fatal: Cannot redeclare plugins_api()". In einem eigenen
+        # activate-Prozess ist die Datei nicht vorgeladen → kein Konflikt.
         sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/postxpro.zip" \
-            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
+            --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
+        sudo -u "$SYSTEM_USER" wp plugin activate ultimate-post-pro \
+            --path="$SITE_PATH" --allow-root || warn "PostX-Aktivierung fehlgeschlagen, uebersprungen"
         log "PostX Pro installiert (Review-/Comparison-Blocks für Tech-Blogs)"
     fi
 fi
@@ -1379,6 +1386,13 @@ cat > "${SITE_PATH}/wp-content/mu-plugins/maintenance-mode.php" <<'MUPLUGIN'
  * Eingeloggte User (Admin) sehen die Seite immer normal.
  * wp-login.php ist immer erreichbar.
  */
+
+// CLI und Cron nie blockieren — sonst sind wp-cli-Wartungsskripte (update-wp,
+// db-cleanup, health-check, rotate-keys …) auf einer Site im Maintenance-Mode
+// unbrauchbar, weil sie statt eines Ergebnisses die HTML-Wartungsseite erhielten.
+if ( ( defined( 'WP_CLI' ) && WP_CLI ) || ( defined( 'DOING_CRON' ) && DOING_CRON ) ) {
+    return;
+}
 
 $_wph_flag = dirname( __FILE__ ) . '/../.maintenance-active';
 
