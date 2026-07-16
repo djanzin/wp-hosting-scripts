@@ -18,7 +18,7 @@ source /etc/wp-hosting/config
 
 SITES_DIR="/etc/wp-hosting/sites"
 
-clear
+clear 2>/dev/null || true
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════╗"
 echo "║   WordPress Health Check                     ║"

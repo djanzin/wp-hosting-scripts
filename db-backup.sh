@@ -44,7 +44,7 @@ if ! flock -n 9; then
     err "Auto-Cron-Backup läuft gerade (oder paralleler manueller Lauf) — bitte später erneut starten."
 fi
 
-clear
+clear 2>/dev/null || true
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════╗"
 echo "║   MariaDB Backup                             ║"

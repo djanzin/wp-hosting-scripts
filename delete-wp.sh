@@ -15,7 +15,7 @@ info() { echo -e "${BLUE}[i]${NC} $1"; }
 
 source /etc/wp-hosting/config
 
-clear
+clear 2>/dev/null || true
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════╗"
 echo "║   WordPress Site entfernen                   ║"

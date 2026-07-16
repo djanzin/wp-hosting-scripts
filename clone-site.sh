@@ -16,7 +16,7 @@ command -v wp &>/dev/null || err "WP-CLI nicht gefunden."
 
 source /etc/wp-hosting/config
 
-clear
+clear 2>/dev/null || true
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════╗"
 echo "║   WordPress Site klonen                      ║"

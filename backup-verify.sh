@@ -37,7 +37,7 @@ if [[ "$(date +%d)" == "01" ]] && ! $DEEP; then
 fi
 
 if ! $QUIET; then
-    clear
+    clear 2>/dev/null || true
     echo -e "${BOLD}"
     echo "╔══════════════════════════════════════════════╗"
     echo "║   Backup-Verifikation                        ║"

@@ -13,7 +13,7 @@ info() { echo -e "${BLUE}[i]${NC} $1"; }
 [[ $EUID -ne 0 ]] && err "Als root ausführen."
 command -v qm &>/dev/null || err "qm nicht gefunden — Script muss auf dem Proxmox-Host laufen."
 
-clear
+clear 2>/dev/null || true
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════╗"
 echo "║   Proxmox Template erstellen                 ║"

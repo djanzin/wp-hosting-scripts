@@ -21,7 +21,7 @@ SITES_DIR="/etc/wp-hosting/sites"
 # Optional: nur eine Domain auditen
 TARGET_DOMAIN="${1:-}"
 
-clear
+clear 2>/dev/null || true
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════╗"
 echo "║   Plugin- & Site-Audit                       ║"
