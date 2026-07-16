@@ -95,3 +95,27 @@ Keypair bleibt als Fallback, wenn kein Recipient angegeben ist.
 
 **Regel:** Dieselbe Funktion in mehreren Skripten IMMER gleich implementieren.
 Secret-Material nie auf der Maschine ablegen, die es schützen soll.
+
+## 2026-07-16 · Harter Reboot einer frischen cloud-init-VM zerstört dpkg-Transaktionen
+
+**Symptom:** Nach einem `qm stop`/`start` (harter Reboot) kurz nach dem ersten Boot
+bricht ein Setup-Skript mit `E: dpkg was interrupted, you must manually run
+'dpkg --configure -a'` ab (apt EXIT 100). `dpkg --audit` meldet eine korrupte Datei
+unter `/var/lib/dpkg/updates/` („end of file after field name").
+
+**Ursache:** Frische cloud-init-VMs fahren beim ersten Boot `unattended-upgrades`/
+`apt-daily`. Ein harter Stop mitten in einer dpkg-Transaktion hinterlässt ein
+korruptes Transaktionsjournal. (Aufgetreten beim RAM-Reboot direkt nach VM-Erstellung —
+timing-abhängig: nur die VM, deren dpkg-Commit gerade lief, war betroffen.)
+
+**Zwei Fixes (beide umgesetzt):**
+1. **Specs vor dem ersten Boot setzen** → kein nachträglicher harter Reboot.
+   `proxmox-create-vm.sh` nimmt jetzt einen RAM-Override entgegen, sodass die VM
+   gleich mit dem Zielwert startet.
+2. **Setup-Skripte robust machen:** vor apt `dpkg --configure -a` (heilt ein
+   unterbrochenes dpkg) und apt-Aufrufe mit `-o DPkg::Lock::Timeout=300` (wartet auf
+   ein noch laufendes unattended-upgrades statt am Lock zu scheitern).
+
+**Regel:** Frische cloud-init-VMs nicht hart neu starten, solange cloud-init/
+unattended-upgrades laufen können — Specs vor dem Boot festlegen. Jedes Skript, das
+apt nutzt, heilt dpkg und wartet auf den Lock.
