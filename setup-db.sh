@@ -133,9 +133,15 @@ confirm_or_die "Einrichtung starten? [j/N]: "
 
 # ── System aktualisieren ───────────────────────────────────────────────────
 info "System wird aktualisiert..."
-apt-get update -q
-DEBIAN_FRONTEND=noninteractive apt-get upgrade -yq
-DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+# Robustheit auf frischen cloud-init-VMs: ein evtl. unterbrochenes dpkg heilen
+# (z.B. nach hartem Reboot mitten in einer dpkg-Transaktion → "dpkg was interrupted")
+# und apt großzügig auf den dpkg-Lock warten lassen (unattended-upgrades hält ihn
+# beim ersten Boot, sonst scheitert apt mit einem Lock-Fehler).
+dpkg --configure -a 2>/dev/null || true
+APT_OPTS=(-o DPkg::Lock::Timeout=300)
+apt-get "${APT_OPTS[@]}" update -q
+DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" upgrade -yq
+DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -yq --no-install-recommends \
     curl wget ufw ca-certificates mariadb-server age \
     unattended-upgrades apt-listchanges
 log "Pakete installiert"

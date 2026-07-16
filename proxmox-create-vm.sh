@@ -37,6 +37,15 @@ case "$vm_choice" in
     *) err "Ungültige Auswahl." ;;
 esac
 
+# ── Optionaler RAM-Override (sonst Typ-Default) ────────────────────────────
+# Erlaubt, die VM gleich mit dem gewünschten RAM zu starten, statt sie nach dem
+# Klonen (hart) neu starten zu müssen. Ein harter Reboot einer frischen
+# cloud-init-VM kann eine laufende dpkg/unattended-upgrades-Transaktion zerstören
+# ("dpkg was interrupted") — deshalb RAM lieber vor dem ersten Boot festlegen.
+read -rp "RAM in MB [Standard: ${VM_RAM}]: " VM_RAM_INPUT
+[[ -n "${VM_RAM_INPUT:-}" ]] && VM_RAM="$VM_RAM_INPUT"
+[[ ! "$VM_RAM" =~ ^[0-9]+$ ]] && err "Ungültiger RAM-Wert (nur Ganzzahl MB): ${VM_RAM}"
+
 # ── Konfiguration abfragen ─────────────────────────────────────────────────
 echo ""
 NEXT_ID=$(pvesh get /cluster/nextid 2>/dev/null || echo "100")
