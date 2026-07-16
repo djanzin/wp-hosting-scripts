@@ -159,6 +159,18 @@ reinen activate-Prozess ist `plugin-install.php` nicht vorgeladen.
 **Regel:** Plugins, deren Aktivierungs-Hook `plugins_api()`/Update-APIs anfasst,
 nie mit `install --activate` in einem Zug installieren — Schritte trennen.
 
+**Nachtrag (Woo-Stack):** Die Klasse trifft mehrere lokale Pro-ZIPs (PostX →
+`plugins_api()`, WowInvoice/WowStore → `Cannot declare class WP_Upgrader`). Statt
+Einzelfixe ein Helper `install_local_zip()`, der `install` und `activate` immer trennt
+und den **Slug aus dem ZIP-Top-Ordner** (`unzip -Z1 … | head -1`) statt aus fragilem
+wp-cli-Output ermittelt. Alle lokalen ZIP-Installs laufen darüber.
+
+**Sonderfall Versions-Inkompatibilität (FunnelKit):** Eine Pro-ZIP im Bucket, die nicht
+zur aktuellen wp.org-Free-Basis passt, wirft nach Aktivierung bei *jedem* WP-Load einen
+Fatal (`Class BWFAN_API_Loader not found`) und **vergiftet alle folgenden wp-cli-Aufrufe**
+(Folgeschritte scheitern, Lauf bricht ab, Cleanup-Trap entfernt die Site). Solche Plugins
+nur **installieren, nicht aktivieren** — Aktivierung manuell, sobald die ZIP-Version passt.
+
 ## 2026-07-16 · `ls glob | …` in `$(...)` bricht bei leerem Match unter pipefail ab
 
 **Symptom:** Ein Skript bricht **kommentarlos mit EXIT 2** ab (keine Fehlermeldung) —

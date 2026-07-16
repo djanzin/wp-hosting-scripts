@@ -10,6 +10,25 @@ warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 err()  { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 info() { echo -e "${BLUE}[i]${NC} $1"; }
 
+# Lokale Plugin-ZIP robust installieren: Install und Aktivierung in GETRENNTE
+# wp-cli-Prozesse. Manche Aktivierungs-Hooks laden WP-Core-Dateien (plugin-install.php,
+# class-wp-upgrader.php) per require erneut → "Cannot (re)declare …" im selben Prozess
+# wie "install --activate". Der Slug wird aus dem Top-Ordner der ZIP ermittelt (unzip),
+# kein fragiles Parsen der wp-cli-Ausgabe. Nutzt globale $SYSTEM_USER / $SITE_PATH.
+install_local_zip() {
+    local zip="$1" label="${2:-$1}" slug
+    [[ -f "$zip" ]] || { warn "ZIP fehlt: ${zip} — ${label} übersprungen"; return 1; }
+    slug=$(unzip -Z1 "$zip" 2>/dev/null | head -1 | cut -d/ -f1)
+    sudo -u "$SYSTEM_USER" wp plugin install "$zip" --path="$SITE_PATH" --allow-root \
+        || { warn "${label}: Install fehlgeschlagen, übersprungen"; return 1; }
+    if [[ -n "$slug" ]]; then
+        sudo -u "$SYSTEM_USER" wp plugin activate "$slug" --path="$SITE_PATH" --allow-root \
+            || warn "${label}: Aktivierung fehlgeschlagen (Slug ${slug}), übersprungen"
+    else
+        warn "${label}: Slug nicht aus ZIP ermittelbar — nicht aktiviert"
+    fi
+}
+
 [[ $EUID -ne 0 ]] && err "Als root ausführen: sudo bash install-wp.sh"
 [[ ! -f /etc/wp-hosting/config ]] && err "Konfiguration nicht gefunden. Bitte zuerst setup-web.sh ausführen."
 
@@ -880,8 +899,7 @@ if [[ "$SITE_TYPE" == "mainwp" ]]; then
 
     # MainWP Dashboard Plugin aus wp-plugins-Bucket
     if [[ -f "${PLUGINS_DIR}/mainwp.zip" ]]; then
-        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/mainwp.zip" \
-            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
+        install_local_zip "${PLUGINS_DIR}/mainwp.zip" "MainWP Dashboard"
         log "MainWP Dashboard installiert"
     else
         warn "MainWP Dashboard ZIP fehlt: ${PLUGINS_DIR}/mainwp.zip — sync-plugins.sh ausführen"
@@ -989,8 +1007,7 @@ fi
 # ── Blocksy Companion Pro (Theme-Erweiterung) ─────────────────────────────
 PLUGINS_DIR="/etc/wp-hosting/plugins"
 if [[ -f "${PLUGINS_DIR}/blocksy-companion-pro.zip" ]]; then
-    sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/blocksy-companion-pro.zip" \
-        --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
+    install_local_zip "${PLUGINS_DIR}/blocksy-companion-pro.zip" "Blocksy Companion Pro"
     log "Blocksy Companion Pro installiert (Theme-Builder, Header/Footer, Custom Post Types)"
 fi
 
@@ -998,15 +1015,7 @@ fi
 if [[ "$SITE_TYPE" == "wordpress" ]]; then
     # PostX Pro — Tech-Blog-Blocks (Reviews, Comparison-Tables, Query Loops)
     if [[ -f "${PLUGINS_DIR}/postxpro.zip" ]]; then
-        # Install und Aktivierung TRENNEN: PostX' Aktivierungs-Hook ruft plugins_api()
-        # auf und lädt dabei wp-admin/includes/plugin-install.php erneut. Läuft das im
-        # selben wp-cli-Prozess wie "plugin install --activate" (der die Datei bereits
-        # geladen hat), gibt es "Fatal: Cannot redeclare plugins_api()". In einem eigenen
-        # activate-Prozess ist die Datei nicht vorgeladen → kein Konflikt.
-        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/postxpro.zip" \
-            --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
-        sudo -u "$SYSTEM_USER" wp plugin activate ultimate-post-pro \
-            --path="$SITE_PATH" --allow-root || warn "PostX-Aktivierung fehlgeschlagen, uebersprungen"
+        install_local_zip "${PLUGINS_DIR}/postxpro.zip" "PostX Pro"
         log "PostX Pro installiert (Review-/Comparison-Blocks für Tech-Blogs)"
     fi
 fi
@@ -1014,23 +1023,20 @@ fi
 if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     # WowStore Pro — Shop-Erweiterung (Quick-View, Filter, Wishlist, Produktgalerien)
     if [[ -f "${PLUGINS_DIR}/wowstore-pro.zip" ]]; then
-        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/wowstore-pro.zip" \
-            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
+        install_local_zip "${PLUGINS_DIR}/wowstore-pro.zip" "WowStore Pro"
         log "WowStore Pro installiert (Shop-Erweiterungen)"
     fi
 
     # WowRevenue Pro — On-Site-Funnels (One-Click Upsells, Order Bumps, Cross-Sells)
     if [[ -f "${PLUGINS_DIR}/wowrevenue-pro.zip" ]]; then
-        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/wowrevenue-pro.zip" \
-            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
+        install_local_zip "${PLUGINS_DIR}/wowrevenue-pro.zip" "WowRevenue Pro"
         log "WowRevenue Pro installiert (On-Site Upsell-/Cross-Sell-Funnels)"
     fi
 
     # WowInvoice — WooCommerce PDF-Rechnungen + Packing Slips
     # Premium-only (kein Free auf wp.org) → vollständiges Plugin direkt aus Bucket-ZIP
     if [[ -f "${PLUGINS_DIR}/wowinvoice-pro.zip" ]]; then
-        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/wowinvoice-pro.zip" \
-            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
+        install_local_zip "${PLUGINS_DIR}/wowinvoice-pro.zip" "WowInvoice"
         log "WowInvoice installiert (PDF-Rechnungen / Packing Slips)"
     else
         warn "WowInvoice ZIP fehlt: ${PLUGINS_DIR}/wowinvoice-pro.zip — sync-plugins.sh ausführen"
@@ -1044,9 +1050,14 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
         warn "FunnelKit Automations Free fehlgeschlagen (Slug prüfen: wp-marketing-automations)"
     fi
     if [[ -f "${PLUGINS_DIR}/funnelkit-automations-pro.zip" ]]; then
+        # NUR installieren, NICHT aktivieren: Die Pro-ZIP im Bucket kann mit der aktuellen
+        # FunnelKit-Free-Basis (wp.org) inkompatibel sein und wirft dann bei Aktivierung
+        # "Class BWFAN_API_Loader not found" bei JEDEM WP-Load → vergiftet alle folgenden
+        # wp-cli-Aufrufe (Payment-Gateways etc. schlagen fehl, Lauf bricht ab). Aktivierung
+        # daher manuell im Dashboard, sobald eine zur Free-Version passende Pro-ZIP vorliegt.
         sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/funnelkit-automations-pro.zip" \
-            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
-        log "FunnelKit Automations Pro installiert"
+            --path="$SITE_PATH" --allow-root || warn "FunnelKit Pro: Install fehlgeschlagen, übersprungen"
+        warn "FunnelKit Automations Pro installiert, aber NICHT aktiviert — Free/Pro-Versionskompatibilität prüfen, dann im Dashboard aktivieren"
     fi
 
     # Payment Gateways — nur Plugin-Install + Aktivierung; API-Keys je Shop manuell
@@ -1089,8 +1100,7 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
         warn "Pixel Manager fehlgeschlagen (Slug: woocommerce-google-adwords-conversion-tracking-tag)"
     fi
     if [[ -f "${PLUGINS_DIR}/pixel-manager-pro.zip" ]]; then
-        sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/pixel-manager-pro.zip" \
-            --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
+        install_local_zip "${PLUGINS_DIR}/pixel-manager-pro.zip" "Pixel Manager PRO"
         log "Pixel Manager PRO installiert (TikTok/Pinterest/Bing + Server-Side CAPI)"
     else
         warn "Pixel Manager PRO ZIP fehlt: ${PLUGINS_DIR}/pixel-manager-pro.zip — für TikTok/Pinterest/Bing + CAPI nötig"
@@ -1103,8 +1113,7 @@ fi
 MAINWP_SECURITY_ID=""
 # Child aus lokalem Zip (Plugin-Bucket) bevorzugen, sonst aus dem wp.org-Repo — immer installieren.
 if [[ -f "${PLUGINS_DIR}/mainwp-child.zip" ]]; then
-    sudo -u "$SYSTEM_USER" wp plugin install "${PLUGINS_DIR}/mainwp-child.zip" \
-        --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
+    install_local_zip "${PLUGINS_DIR}/mainwp-child.zip" "MainWP Child"
 else
     sudo -u "$SYSTEM_USER" wp plugin install mainwp-child --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
 fi
