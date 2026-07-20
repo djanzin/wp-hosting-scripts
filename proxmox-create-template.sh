@@ -25,8 +25,14 @@ echo -e "${NC}"
 read -rp "Template-VM-ID [Standard: 9000]: " TEMPLATE_ID
 TEMPLATE_ID=${TEMPLATE_ID:-9000}
 
-if qm status "$TEMPLATE_ID" &>/dev/null; then
-    err "VM-ID ${TEMPLATE_ID} existiert bereits. Andere ID wählen oder bestehende VM löschen."
+# VMID muss clusterweit eindeutig sein: pmxcfs (/etc/pve) ist clusterweit gemountet, 'qm status'
+# sieht dagegen nur den lokalen Node — eine Kollision auf einem anderen Node fiele sonst erst beim
+# 'qm create' auf. VM- und CT-IDs teilen denselben Namespace, daher beide Verzeichnisse prüfen.
+shopt -s nullglob
+_EXISTING_CONF=( /etc/pve/nodes/*/qemu-server/"${TEMPLATE_ID}".conf /etc/pve/nodes/*/lxc/"${TEMPLATE_ID}".conf )
+shopt -u nullglob
+if (( ${#_EXISTING_CONF[@]} > 0 )); then
+    err "VM-/CT-ID ${TEMPLATE_ID} existiert bereits im Cluster (${_EXISTING_CONF[0]}). Andere ID wählen oder bestehende VM/CT löschen."
 fi
 
 read -rp "vCPU Anzahl [Standard: 2]: " TEMPLATE_CORES
