@@ -96,14 +96,14 @@ Internet → Cloudflare → Caddy (SSL + Authentik-OIDC für MainWP)
 > **Variante A — ganzes Repo klonen (empfohlen).** Auf jeder Maschine (Proxmox-Host, DB-VM, Web-VMs)
 > einmal klonen, dann das jeweils benötigte Script ausführen:
 > ```bash
-> git clone https://github.com/djanzin/wp-hosting-scripts.git
+> git clone https://github.com/greecro/wp-hosting-scripts.git
 > cd wp-hosting-scripts
 > ```
 >
 > **Variante B — einzelnes Script per `curl`.** Wenn `git` nicht installiert ist, lädst du nur das
 > Script, das du gerade brauchst (die Befehle in jedem Schritt unten sind genau dafür da):
 > ```bash
-> curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/<script>.sh
+> curl -fsSLO https://raw.githubusercontent.com/greecro/wp-hosting-scripts/main/<script>.sh
 > ```
 > `-fsSL` bricht bei HTTP-Fehler **laut** ab (statt eine Fehlerseite zu speichern) und folgt Redirects.
 > **Tipp:** nach dem Download `head -3 <script>` prüfen — muss mit `#!/bin/bash` beginnen.
@@ -111,7 +111,7 @@ Internet → Cloudflare → Caddy (SSL + Authentik-OIDC für MainWP)
 ### Schritt 1 — Template erstellen (Proxmox Host, einmalig)
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/proxmox-create-template.sh
+curl -fsSLO https://raw.githubusercontent.com/greecro/wp-hosting-scripts/main/proxmox-create-template.sh
 bash proxmox-create-template.sh
 ```
 
@@ -122,7 +122,7 @@ Erstellt ein Ubuntu 24.04 Cloud-init Template (Standard-ID: 9000).
 ### Schritt 2 — VMs anlegen (Proxmox Host)
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/proxmox-create-vm.sh
+curl -fsSLO https://raw.githubusercontent.com/greecro/wp-hosting-scripts/main/proxmox-create-vm.sh
 bash proxmox-create-vm.sh   # Datenbank-VM
 bash proxmox-create-vm.sh   # WordPress-VM
 bash proxmox-create-vm.sh   # WooCommerce-VM
@@ -143,7 +143,7 @@ bash proxmox-create-vm.sh   # WooCommerce-VM
 
 ```bash
 ssh ubuntu@<DB-VM-IP>
-curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/setup-db.sh
+curl -fsSLO https://raw.githubusercontent.com/greecro/wp-hosting-scripts/main/setup-db.sh
 sudo bash setup-db.sh
 ```
 
@@ -155,7 +155,7 @@ Gibt DB-Admin-Zugangsdaten aus → für Schritt 4 notieren.
 
 ```bash
 ssh ubuntu@<WEB-VM-IP>
-curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/setup-web.sh
+curl -fsSLO https://raw.githubusercontent.com/greecro/wp-hosting-scripts/main/setup-web.sh
 sudo bash setup-web.sh
 ```
 
@@ -173,7 +173,7 @@ Fragt nach: VM-Typ, DB-VM-IP, DB-Zugangsdaten, Admin-E-Mail, Reverse-Proxy-IP (C
 > (siehe [`docs/dns-mail-setup.md`](docs/dns-mail-setup.md)) — dann läuft der Pre-Flight-Check glatt durch.
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/install-wp.sh
+curl -fsSLO https://raw.githubusercontent.com/greecro/wp-hosting-scripts/main/install-wp.sh
 sudo bash install-wp.sh
 ```
 
@@ -197,7 +197,7 @@ Danach Endpunkt provisionieren (`provision-endpoint.sh` im privaten `homelab-pro
 Jede neue Site startet im **Maintenance Mode**:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/maintenance.sh
+curl -fsSLO https://raw.githubusercontent.com/greecro/wp-hosting-scripts/main/maintenance.sh
 sudo bash maintenance.sh
 ```
 

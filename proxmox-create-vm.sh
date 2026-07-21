@@ -240,13 +240,13 @@ case "$VM_TYPE" in
     db)
         echo -e "${BOLD}  Nächster Schritt — auf der VM ausführen:${NC}"
         echo -e "  ssh ubuntu@${VM_IP}"
-        echo -e "  curl -sO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/setup-db.sh"
+        echo -e "  curl -sO https://raw.githubusercontent.com/greecro/wp-hosting-scripts/main/setup-db.sh"
         echo -e "  sudo bash setup-db.sh"
         ;;
     wordpress|woocommerce)
         echo -e "${BOLD}  Nächster Schritt — auf der VM ausführen:${NC}"
         echo -e "  ssh ubuntu@${VM_IP}"
-        echo -e "  curl -sO https://raw.githubusercontent.com/djanzin/wp-hosting-scripts/main/setup-web.sh"
+        echo -e "  curl -sO https://raw.githubusercontent.com/greecro/wp-hosting-scripts/main/setup-web.sh"
         echo -e "  sudo bash setup-web.sh"
         ;;
 esac
