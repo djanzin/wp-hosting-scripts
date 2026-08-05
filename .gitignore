@@ -6,6 +6,7 @@
 
 # Echte Config-Dateien (nur *.example gehört ins Repo)
 setup-web.conf
+setup-db.conf
 sheet.conf
 /config
 

@@ -10,8 +10,10 @@
 # ── Web-VM-IPs, die auf die DB zugreifen dürfen (Pflicht, kommagetrennt) ──
 WEB_VM_IPS=192.168.1.10,192.168.1.11
 
-# ── Benachrichtigungen (optional) ──
-WEBHOOK_URL=https://uptime-kuma.example.com/api/push/DEIN_KEY
+# ── Benachrichtigungen (optional): Slack Incoming Webhook ──
+# notify() postet Backup-/Disk-Alerts als POST JSON {"text":…} an diese URL.
+# Leer = Alerts bleiben lokal (kein Slack). Format: https://hooks.slack.com/services/…
+SLACK_WEBHOOK_URL=
 
 # ── age Public-Key für Backup-Verschlüsselung (optional; muss mit age1 beginnen) ──
 AGE_RECIPIENT=

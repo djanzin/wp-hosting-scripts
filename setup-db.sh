@@ -47,8 +47,8 @@ echo -e "${NC}"
 ask WEB_VM_IPS "IPs der Web-VMs, kommagetrennt (z.B. 192.168.1.10,192.168.1.11): "
 [[ -z "${WEB_VM_IPS:-}" ]] && err "Mindestens eine Web-VM-IP angeben (WEB_VM_IPS)."
 
-ask WEBHOOK_URL "Webhook-URL für Benachrichtigungen (leer = deaktiviert): "
-WEBHOOK_URL="${WEBHOOK_URL:-}"
+ask SLACK_WEBHOOK_URL "Slack Incoming Webhook-URL für Alerts (leer = deaktiviert): "
+SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}"
 
 ask AGE_RECIPIENT "age Public-Key für Backup-Verschlüsselung (leer = unverschlüsselt): "
 AGE_RECIPIENT="${AGE_RECIPIENT:-}"
@@ -142,7 +142,7 @@ APT_OPTS=(-o DPkg::Lock::Timeout=300)
 apt-get "${APT_OPTS[@]}" update -q
 DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" upgrade -yq
 DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -yq --no-install-recommends \
-    curl wget ufw ca-certificates mariadb-server age \
+    curl wget jq ufw ca-certificates mariadb-server age \
     unattended-upgrades apt-listchanges
 log "Pakete installiert"
 
@@ -435,6 +435,9 @@ RCLONE_DEST="${RCLONE_DEST_CFG}"
 ERRORS=0
 mkdir -p "\$BACKUP_DIR"
 
+# Slack-Helper laden (notify() postet Backup-Fehler nach Slack; No-Op wenn nicht konfiguriert)
+[[ -r /usr/local/lib/wp-hosting-notify.sh ]] && . /usr/local/lib/wp-hosting-notify.sh
+
 # Verschlüsselung aktiv?
 RECIPIENT_FILE="/etc/wp-hosting/backup-recipient.txt"
 ENCRYPT=false
@@ -495,12 +498,10 @@ else
     ERRORS=\$((ERRORS + 1))
 fi
 
-# Webhook bei Fehler
-source /etc/wp-hosting/config 2>/dev/null || true
-if [[ \${ERRORS} -gt 0 ]] && [[ -n "\${WEBHOOK_URL:-}" ]]; then
-    MSG="Backup FEHLER: \${ERRORS} MariaDB-Dump(s) fehlgeschlagen — \$(hostname -s)"
-    curl -fsS -G --data-urlencode "msg=\${MSG}" "\${WEBHOOK_URL}?status=down" \
-        -o /dev/null 2>/dev/null || true
+# Slack-Alarm bei Fehler
+if [[ \${ERRORS} -gt 0 ]]; then
+    command -v notify >/dev/null 2>&1 && \
+        notify "MariaDB-Backup fehlgeschlagen" "\${ERRORS} Dump/Remote-Sync-Fehler — Details: \$LOG"
 fi
 
 # Mit Fehleranzahl beenden, damit Cron/Cronicle/Uptime einen kaputten Lauf erkennt
@@ -511,13 +512,46 @@ chmod +x /usr/local/bin/mysql-backup.sh
 echo "0 2 * * * root /usr/bin/flock -n /var/lock/mysql-backup.lock /usr/local/bin/mysql-backup.sh" > /etc/cron.d/mysql-backup
 log "MariaDB Backup-Cron konfiguriert (täglich 02:00, flock-protected → /var/backups/mysql, 7 Tage)"
 
-# ── Disk Space Alert Script ───────────────────────────────────────────────
+# ── Slack-Alerts (notify-Helper) + Disk Space Alert Script ─────────────────
 mkdir -p /etc/wp-hosting /var/lib/wp-hosting/disk-state
-# DB-VM-lokale Config (nur WEBHOOK_URL nötig — disk-alert + mysql-backup-Cron).
-# Quotes: WEBHOOK_URL kann Sonderzeichen/Query-Params enthalten → sonst bricht das Sourcen.
-# Wert shell-sicher serialisieren (printf %q) — Datei wird per `source` geladen.
-printf 'WEBHOOK_URL=%q\n' "${WEBHOOK_URL:-}" > /etc/wp-hosting/config
-chmod 600 /etc/wp-hosting/config
+
+# Slack-Helper installieren — wird von mysql-backup.sh + disk-alert.sh gesourct.
+# notify() postet in einen Slack Incoming Webhook (POST JSON {text}); fehlt die
+# Webhook-Datei, ist notify() ein No-Op (ein Alarm darf das aufrufende Script nie killen).
+cat > /usr/local/lib/wp-hosting-notify.sh <<'NOTIFYEOF'
+#!/bin/bash
+# Zentrale Slack-Benachrichtigung für die wp-hosting DB-VM-Scripts.
+# Wird gesourct (nicht direkt ausgeführt) und stellt notify() bereit.
+SLACK_WEBHOOK_FILE="${SLACK_WEBHOOK_FILE:-/etc/wp-hosting/slack-webhook.txt}"
+
+# notify <titel> <details>
+notify() {
+    local title="${1:-wp-hosting-db}" body="${2:-}"
+    [[ -r "$SLACK_WEBHOOK_FILE" ]] || return 0
+    local url
+    url=$(tr -d '[:space:]' < "$SLACK_WEBHOOK_FILE") || return 0
+    [[ -n "$url" ]] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    local text
+    text=":rotating_light: *${title}* auf \`$(hostname -s)\`"$'\n'"${body}"
+    local payload
+    payload=$(jq -nc --arg t "$text" '{text: $t}') || return 0
+    curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+        --data "$payload" "$url" >/dev/null 2>&1 || true
+    return 0
+}
+NOTIFYEOF
+chmod 0755 /usr/local/lib/wp-hosting-notify.sh
+log "Slack-Helper installiert: /usr/local/lib/wp-hosting-notify.sh"
+
+# Slack Incoming Webhook-URL als Secret ablegen (notify() liest sie dort).
+if [[ -n "${SLACK_WEBHOOK_URL:-}" ]]; then
+    printf '%s\n' "$SLACK_WEBHOOK_URL" > /etc/wp-hosting/slack-webhook.txt
+    chmod 600 /etc/wp-hosting/slack-webhook.txt
+    log "Slack-Webhook hinterlegt — Backup-/Disk-Alerts gehen an Slack"
+else
+    warn "Keine SLACK_WEBHOOK_URL gesetzt — Alerts bleiben lokal (notify() ist No-Op)"
+fi
 
 # Config für manuelle Backup-Tools — db-backup.sh teilt sich diesen Remote mit Auto-Cron
 printf 'RCLONE_DEST=%q\n' "${RCLONE_DEST}" > /etc/wp-hosting/db-backup.conf
@@ -536,22 +570,18 @@ cat > /usr/local/bin/disk-alert.sh <<'ALERTEOF'
 # Disk Space Alert — stündlich via Cron
 set -euo pipefail
 
-source /etc/wp-hosting/config 2>/dev/null || exit 0
-[[ -z "${WEBHOOK_URL:-}" ]] && exit 0
+[[ -r /usr/local/lib/wp-hosting-notify.sh ]] || exit 0
+. /usr/local/lib/wp-hosting-notify.sh
+[[ -r /etc/wp-hosting/slack-webhook.txt ]] || exit 0
 
 THRESHOLD_WARN=80
 THRESHOLD_CRIT=90
-HOST=$(hostname -s)
 STATE_DIR="/var/lib/wp-hosting/disk-state"
 mkdir -p "$STATE_DIR"
 
 send_webhook() {
     local status="$1" emoji="$2" level="$3" mount="$4" pct="$5" avail="$6"
-    local msg="${emoji} Disk ${level}: ${HOST} | ${mount} | ${pct}% belegt | ${avail} frei"
-    curl -fsS -G \
-        --data-urlencode "msg=${msg}" \
-        "${WEBHOOK_URL}?status=${status}" \
-        -o /dev/null 2>/dev/null || true
+    notify "Disk ${level}" "${emoji} ${mount} | ${pct}% belegt | ${avail} frei"
 }
 
 while IFS= read -r line; do
@@ -579,7 +609,7 @@ ALERTEOF
 
 chmod +x /usr/local/bin/disk-alert.sh
 echo "0 * * * * root /usr/local/bin/disk-alert.sh" > /etc/cron.d/disk-alert
-[[ -n "${WEBHOOK_URL:-}" ]] && log "Disk Space Alert eingerichtet (stündlich, Webhook bei >80%/>90%)" || log "Disk Space Alert eingerichtet (kein Webhook — nur lokal)"
+[[ -n "${SLACK_WEBHOOK_URL:-}" ]] && log "Disk Space Alert eingerichtet (stündlich, Slack bei >80%/>90%)" || log "Disk Space Alert eingerichtet (kein Slack-Webhook — nur lokal)"
 
 # ── Services starten ───────────────────────────────────────────────────────
 systemctl enable mariadb
