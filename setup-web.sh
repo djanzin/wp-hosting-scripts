@@ -261,7 +261,7 @@ APT_OPTS=(-o DPkg::Lock::Timeout=300)
 apt-get "${APT_OPTS[@]}" update -q
 DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" upgrade -yq
 DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -yq --no-install-recommends \
-    curl wget unzip git ca-certificates gnupg age \
+    curl wget unzip git ca-certificates gnupg age qemu-guest-agent \
     fail2ban ufw mysql-client \
     unattended-upgrades apt-listchanges \
     nginx redis-server \
@@ -269,6 +269,11 @@ DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -yq --no-install
     php8.3-mbstring php8.3-xml php8.3-zip php8.3-intl \
     php8.3-soap php8.3-bcmath php8.3-imagick php8.3-opcache
 log "Pakete installiert"
+
+# QEMU-Guest-Agent aktivieren — Proxmox erwartet ihn (agent: enabled=1):
+# graceful shutdown, IP-Report und fstrim laufen erst darüber. Cloud-Image
+# bringt ihn nicht mit, daher oben in der Paketliste + hier scharfschalten.
+systemctl enable --now qemu-guest-agent 2>/dev/null || true
 
 # ── rclone installieren & konfigurieren ───────────────────────────────────
 if [[ -n "$RCLONE_REMOTE" ]]; then
