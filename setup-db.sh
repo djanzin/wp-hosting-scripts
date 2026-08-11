@@ -243,11 +243,6 @@ TOTAL_RAM_MB=$((TOTAL_RAM_KB / 1024))
 IB_POOL_MB=$((TOTAL_RAM_MB / 2))
 IB_POOL="${IB_POOL_MB}M"
 
-# InnoDB-Instanzen: 1 pro GB Buffer Pool, max 8
-IB_INSTANCES=$((IB_POOL_MB / 1024))
-[[ $IB_INSTANCES -lt 1 ]] && IB_INSTANCES=1
-[[ $IB_INSTANCES -gt 8 ]] && IB_INSTANCES=8
-
 # WICHTIG: Nach mariadb.conf.d/ mit Präfix 99- ablegen, NICHT nach conf.d/.
 # my.cnf lädt conf.d/ VOR mariadb.conf.d/ — eine Datei in conf.d/ würde von
 # mariadb.conf.d/50-server.cnf (bind-address = 127.0.0.1) wieder überschrieben,
@@ -260,7 +255,6 @@ collation-server      = utf8mb4_unicode_ci
 
 # InnoDB — Kernspeicher
 innodb_buffer_pool_size       = ${IB_POOL}
-innodb_buffer_pool_instances  = ${IB_INSTANCES}
 innodb_log_file_size          = 256M
 innodb_flush_log_at_trx_commit = 2
 innodb_flush_method           = O_DIRECT
@@ -314,7 +308,7 @@ cat > /etc/systemd/system/mariadb.service.d/limits.conf <<EOF
 LimitNOFILE=65535
 EOF
 systemctl daemon-reload
-log "MariaDB konfiguriert (InnoDB Buffer: ${IB_POOL}, ${IB_INSTANCES} Instanz(en))"
+log "MariaDB konfiguriert (InnoDB Buffer: ${IB_POOL})"
 
 # ── MariaDB sichern & Admin-User anlegen ───────────────────────────────────
 systemctl restart mariadb
