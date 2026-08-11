@@ -298,7 +298,7 @@ Kein Blocksy, kein WooCommerce, kein MainWP Child auf der Dashboard-Site selbst.
 - Eigener **PHP-FPM-Pool** (dynamic für WP, static für WooCommerce, Slow Log ab 5s)
 - Eigener **Nginx-Vhost** mit FastCGI-Cache und WebP-Serving
 - Eigene **MariaDB-Datenbank** + User mit 32-stelligem Passwort
-- **WP-Cron** via System-Cron (alle 5 Minuten, kein Frontend-Overhead)
+- **WP-Cron** extern via Cronicle (GET `wp-cron.php` alle 5 Min, angelegt durch `provision-endpoint.sh` im privaten `homelab-provisioning`) — lokal `DISABLE_WP_CRON=true`, kein System-Cron, kein Frontend-Overhead
 - **SFTP-Zugang** (Chroot-Jail, Passwort-Auth, landet direkt im Site-Verzeichnis)
 - **Filebrowser-User** mit Scope auf das Site-Verzeichnis
 
