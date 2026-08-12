@@ -1404,7 +1404,7 @@ cat > "${SITE_PATH}/wp-content/mu-plugins/maintenance-mode.php" <<'MUPLUGIN'
  * Deaktivieren: rm wp-content/.maintenance-active
  *
  * Eingeloggte User (Admin) sehen die Seite immer normal.
- * wp-login.php ist immer erreichbar.
+ * wp-login.php und die MainWP-REST-API (/wp-json/mainwp/) sind immer erreichbar.
  */
 
 // CLI und Cron nie blockieren — sonst sind wp-cli-Wartungsskripte (update-wp,
@@ -1423,6 +1423,14 @@ if ( ! file_exists( $_wph_flag ) ) {
 // wp-login.php immer durchlassen
 if ( isset( $_SERVER['REQUEST_URI'] ) &&
      strpos( $_SERVER['REQUEST_URI'], 'wp-login.php' ) !== false ) {
+    return;
+}
+
+// MainWP-REST-API immer durchlassen: Dashboard-Fernsteuerung und Child-Anbindung
+// laufen per Consumer-Key-Auth und muessen auch im Wartungsmodus antworten. Nur die
+// mainwp-VM registriert /wp-json/mainwp/-Routen; auf Child-Sites 404 (harmlos).
+if ( isset( $_SERVER['REQUEST_URI'] ) &&
+     strpos( $_SERVER['REQUEST_URI'], '/wp-json/mainwp/' ) !== false ) {
     return;
 }
 
