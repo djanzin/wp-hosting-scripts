@@ -95,8 +95,17 @@ log "Site-Verzeichnis entfernt: ${SITE_PATH}"
 FB_DB="/etc/filebrowser/database.db"
 FB_USER="${DOMAIN_SAFE:0:32}"
 if [[ -f "$FB_DB" ]] && command -v filebrowser &>/dev/null; then
-    filebrowser users rm "$FB_USER" --database "$FB_DB" 2>/dev/null || true
-    log "Filebrowser User entfernt: ${FB_USER}"
+    # Der laufende Dienst haelt die Bolt-DB exklusiv — ohne Stopp scheitert das Entfernen
+    # mit "Error: timeout" und der User bliebe als Leiche mit Zugriff zurueck.
+    _fb_was_active=false
+    if systemctl is-active --quiet filebrowser 2>/dev/null; then _fb_was_active=true; fi
+    $_fb_was_active && { systemctl stop filebrowser 2>/dev/null || true; }
+    if filebrowser users rm "$FB_USER" --database "$FB_DB" >/dev/null 2>&1; then
+        log "Filebrowser User entfernt: ${FB_USER}"
+    else
+        warn "Filebrowser User ${FB_USER} konnte nicht entfernt werden — bitte manuell prüfen."
+    fi
+    $_fb_was_active && { systemctl start filebrowser 2>/dev/null || true; }
 fi
 
 # ── SFTP Chroot aufräumen ─────────────────────────────────────────────────

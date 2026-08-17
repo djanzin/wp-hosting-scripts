@@ -400,13 +400,29 @@ FB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20) || true
 FB_USER="${DOMAIN_SAFE:0:32}"
 
 if [[ -f "$FB_DB" ]] && command -v filebrowser &>/dev/null; then
-    filebrowser users add "$FB_USER" "$FB_PASS" \
-        --scope "$SITE_PATH" --database "$FB_DB" \
-        --perm.create --perm.rename --perm.modify --perm.delete --perm.download 2>/dev/null || \
-    filebrowser users update "$FB_USER" \
-        --password "$FB_PASS" --scope "$SITE_PATH" \
-        --database "$FB_DB" 2>/dev/null || true
-    log "Filebrowser User angelegt: ${FB_USER}"
+    # Bolt-DB erlaubt nur EINEN Writer: laufender Dienst => "Error: timeout". Dienst kurz
+    # stoppen und den Erfolg danach pruefen — sonst steht ein Passwort in der Cred-Datei,
+    # zu dem es gar keinen User gibt.
+    _fb_was_active=false
+    if systemctl is-active --quiet filebrowser 2>/dev/null; then _fb_was_active=true; fi
+    $_fb_was_active && { systemctl stop filebrowser 2>/dev/null || true; }
+    _fb_ok=false
+    if filebrowser users add "$FB_USER" "$FB_PASS" \
+            --scope "$SITE_PATH" --database "$FB_DB" \
+            --perm.create --perm.rename --perm.modify --perm.delete --perm.download >/dev/null 2>&1 \
+       || filebrowser users update "$FB_USER" \
+            --password "$FB_PASS" --scope "$SITE_PATH" \
+            --database "$FB_DB" >/dev/null 2>&1; then
+        filebrowser users ls --database "$FB_DB" 2>/dev/null \
+            | awk '{print $2}' | grep -qxF "$FB_USER" && _fb_ok=true
+    fi
+    $_fb_was_active && { systemctl start filebrowser 2>/dev/null || true; }
+    if $_fb_ok; then
+        log "Filebrowser User angelegt: ${FB_USER}"
+    else
+        warn "Filebrowser-User ${FB_USER} konnte NICHT angelegt werden (DB gesperrt?) — manuell nachholen."
+        FB_PASS="n/a"
+    fi
 else
     warn "Filebrowser nicht gefunden — User manuell anlegen"
     FB_PASS="n/a"

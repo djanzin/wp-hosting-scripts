@@ -293,11 +293,18 @@ cleanup_on_error() {
     sed -i "\|${SITE_PATH}.*${SFTP_CHROOT}/site|d" /etc/fstab 2>/dev/null || true
     rm -rf "$SFTP_CHROOT"
 
-    # Filebrowser User entfernen
+    # Filebrowser User entfernen. Auch hier gilt: der laufende Dienst haelt die Bolt-DB
+    # exklusiv, ein CLI-Zugriff liefe sonst in "Error: timeout" und der User bliebe als
+    # Leiche zurueck. Dienst daher kurz stoppen (best effort, Rollback-Pfad).
     FB_DB="/etc/filebrowser/database.db"
     FB_USER="${DOMAIN_SAFE:0:32}"
-    [[ -f "$FB_DB" ]] && command -v filebrowser &>/dev/null && \
-        filebrowser users rm "$FB_USER" --database "$FB_DB" 2>/dev/null || true
+    if [[ -f "$FB_DB" ]] && command -v filebrowser &>/dev/null; then
+        _fb_was_active=false
+        if systemctl is-active --quiet filebrowser 2>/dev/null; then _fb_was_active=true; fi
+        $_fb_was_active && { systemctl stop filebrowser 2>/dev/null || true; }
+        filebrowser users rm "$FB_USER" --database "$FB_DB" >/dev/null 2>&1 || true
+        $_fb_was_active && { systemctl start filebrowser 2>/dev/null || true; }
+    fi
 
     # Site-Verzeichnis entfernen
     rm -rf "$SITE_PATH"
@@ -1518,19 +1525,45 @@ FB_PASS=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20) || true
 FB_USER="${DOMAIN_SAFE:0:32}"
 
 if [[ -f "$FB_DB" ]] && command -v filebrowser &>/dev/null; then
-    filebrowser users add "$FB_USER" "$FB_PASS" \
-        --scope "$SITE_PATH" \
-        --database "$FB_DB" \
-        --perm.create \
-        --perm.rename \
-        --perm.modify \
-        --perm.delete \
-        --perm.download 2>/dev/null || \
-    filebrowser users update "$FB_USER" \
-        --password "$FB_PASS" \
-        --scope "$SITE_PATH" \
-        --database "$FB_DB" 2>/dev/null || true
-    log "Filebrowser User angelegt: ${FB_USER}"
+    # Die Bolt-Datenbank von Filebrowser erlaubt nur EINEN Writer: solange der Dienst
+    # läuft, scheitert jeder CLI-Schreibzugriff mit "Error: timeout". Deshalb den Dienst
+    # um den Aufruf herum kurz stoppen und danach wieder starten.
+    # Fehler werden NICHT mehr verschluckt: vorher lief alles in `|| true` und das Script
+    # meldete "User angelegt", obwohl keiner existierte — das Passwort landete trotzdem in
+    # der Cred-Datei (und von dort in 1Password), ohne dass es dazu je einen User gab.
+    FB_WAS_ACTIVE=false
+    if systemctl is-active --quiet filebrowser 2>/dev/null; then FB_WAS_ACTIVE=true; fi
+    $FB_WAS_ACTIVE && { systemctl stop filebrowser 2>/dev/null || true; }
+
+    FB_OK=false
+    if filebrowser users add "$FB_USER" "$FB_PASS" \
+            --scope "$SITE_PATH" \
+            --database "$FB_DB" \
+            --perm.create \
+            --perm.rename \
+            --perm.modify \
+            --perm.delete \
+            --perm.download >/dev/null 2>&1 \
+       || filebrowser users update "$FB_USER" \
+            --password "$FB_PASS" \
+            --scope "$SITE_PATH" \
+            --database "$FB_DB" >/dev/null 2>&1; then
+        # Erfolg erst glauben, wenn der User wirklich in der Datenbank steht.
+        if filebrowser users ls --database "$FB_DB" 2>/dev/null \
+             | awk '{print $2}' | grep -qxF "$FB_USER"; then
+            FB_OK=true
+        fi
+    fi
+
+    $FB_WAS_ACTIVE && { systemctl start filebrowser 2>/dev/null || true; }
+
+    if $FB_OK; then
+        log "Filebrowser User angelegt: ${FB_USER}"
+    else
+        warn "Filebrowser-User ${FB_USER} konnte NICHT angelegt werden (DB gesperrt?) — manuell nachholen:"
+        warn "  systemctl stop filebrowser && filebrowser users add <user> <pass> --scope ${SITE_PATH} --database ${FB_DB} && systemctl start filebrowser"
+        FB_PASS="n/a"
+    fi
 else
     warn "Filebrowser nicht gefunden — User manuell anlegen"
     FB_PASS="n/a"
