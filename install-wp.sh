@@ -1635,28 +1635,31 @@ echo -e "${BOLD}╔════════════════════�
 echo -e "║   ${SITE_TYPE^} installiert ✓"
 echo -e "╚══════════════════════════════════════════════╝${NC}"
 echo ""
+# Bewusst OHNE Passwörter: stdout landet in Logs, Terminal-Scrollback, CI- und
+# Session-Mitschnitten. Die Geheimnisse stehen ausschließlich in $CRED_FILE (chmod 600)
+# und werden von dort nach 1Password übernommen (provision-endpoint.sh, ensure_credentials).
 echo -e "  URL:           ${BOLD}https://${DOMAIN}${NC}"
 echo -e "  WP-Admin:      ${BOLD}https://${DOMAIN}/wp-admin${NC}"
 echo -e "  Admin-User:    ${BOLD}${WP_ADMIN_USER}${NC}"
-echo -e "  Admin-Pass:    ${BOLD}${WP_ADMIN_PASS}${NC}"
 echo ""
 echo -e "  DB-Name:       ${BOLD}${DB_NAME}${NC}"
 echo -e "  DB-User:       ${BOLD}${DB_USER}${NC}"
-echo -e "  DB-Pass:       ${BOLD}${DB_PASS}${NC}"
 echo ""
 echo -e "  FB-User:       ${BOLD}${FB_USER}${NC}"
-echo -e "  FB-Pass:       ${BOLD}${FB_PASS}${NC}"
 echo ""
 echo -e "  SFTP-Host:     ${BOLD}$(hostname -I | awk '{print $1}')${NC}"
 echo -e "  SFTP-User:     ${BOLD}${SYSTEM_USER}${NC}"
-echo -e "  SFTP-Pass:     ${BOLD}${SFTP_PASS}${NC}"
 echo -e "  SFTP-Pfad:     ${BOLD}/site${NC}"
 echo ""
-echo -e "${YELLOW}  → Zugangsdaten gespeichert: ${CRED_FILE}${NC}"
+echo -e "${YELLOW}  → Passwörter stehen NUR in ${CRED_FILE} (chmod 600) — nicht in dieser Ausgabe.${NC}"
+echo -e "${YELLOW}     Auslesen: sudo cat ${CRED_FILE}${NC}"
 echo -e "${YELLOW}  → Site ist im Maintenance Mode — freischalten: sudo bash maintenance.sh${NC}"
 echo -e "${YELLOW}  → Endpunkt via provision-endpoint.sh einrichten (Caddy-Block + DNS + Cron + Matomo).${NC}"
 if [[ -n "$MAINWP_SECURITY_ID" ]]; then
-echo -e "${YELLOW}  → MainWP: Im Dashboard 'Add Site' → URL + Admin-Login + Security ID ${BOLD}${MAINWP_SECURITY_ID}${NC}"
+# ID unformatiert lassen: Werkzeuge (deploy-site.sh) greifen sie per grep aus dem Log,
+# dazwischenliegende ANSI-Codes würden das Muster brechen.
+echo -e "${YELLOW}  → MainWP: im Dashboard 'Add Site' → URL + Admin-Login + Unique Security ID${NC}"
+echo "     Security ID: ${MAINWP_SECURITY_ID}"
 elif [[ "$SITE_TYPE" == "mainwp" ]]; then
 echo -e "${YELLOW}  → MainWP Dashboard: ${BOLD}https://${DOMAIN}/wp-admin/admin.php?page=mainwp_tab${NC}"
 echo -e "${YELLOW}     Caddy-Block mit Authentik-Forward-Auth einrichten (siehe homelab-caddy).${NC}"
