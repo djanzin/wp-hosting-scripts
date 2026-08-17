@@ -14,7 +14,7 @@
 #   sudo bash db-cleanup.sh                      — alle Sites
 #   sudo bash db-cleanup.sh <domain>             — nur eine Site
 #   sudo bash db-cleanup.sh --quiet              — ohne Ausgabe (für Cron)
-#   sudo bash db-cleanup.sh --quiet --notify     — + Webhook bei Fehler
+#   sudo bash db-cleanup.sh --quiet --notify     — + Slack-Alarm bei Fehler
 #
 # Cron (via setup-web.sh): sonntags 05:00, flock-protected
 
@@ -122,11 +122,10 @@ echo "[$(date '+%Y-%m-%d %H:%M')] ${MSG}" >> "$LOG"
 
 $QUIET || { echo ""; echo -e "${BOLD}${MSG}${NC}"; echo -e "Log: ${LOG}"; }
 
-# Webhook nur bei Fehler (Uptime Kuma Push)
-if $NOTIFY && [[ -n "${WEBHOOK_URL:-}" ]]; then
-    STATUS=$( [[ $FAILED -eq 0 ]] && echo "up" || echo "down" )
-    curl -fsS -G --data-urlencode "msg=${MSG}" "${WEBHOOK_URL}?status=${STATUS}" \
-        -o /dev/null 2>/dev/null || true
+# Slack-Alarm nur bei Fehler
+[[ -r /usr/local/lib/wp-hosting-notify.sh ]] && . /usr/local/lib/wp-hosting-notify.sh
+if $NOTIFY && [[ $FAILED -gt 0 ]] && command -v notify >/dev/null 2>&1; then
+    notify "DB-Cleanup mit Fehlern" "${MSG}"
 fi
 
 [[ $FAILED -gt 0 ]] && exit 1 || exit 0

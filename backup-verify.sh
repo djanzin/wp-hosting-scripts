@@ -153,13 +153,12 @@ else
     MSG="Backup-Verify FEHLER: ${FAILED}/${TOTAL} (${FAILED_FILES[*]})"
 fi
 
-# Webhook
+# Slack-Alarm (nur bei Fehler — grüne Läufe erzeugen keinen Ping)
 NOTIFY=false
 for arg in "$@"; do [[ "$arg" == "--notify" ]] && NOTIFY=true; done
-source /etc/wp-hosting/config 2>/dev/null || true
-if [[ -n "${WEBHOOK_URL:-}" ]] && { [[ "$STATUS" == "down" ]] || $NOTIFY; }; then
-    curl -fsS -G --data-urlencode "msg=${MSG}" "${WEBHOOK_URL}?status=${STATUS}" \
-        -o /dev/null 2>/dev/null || true
+[[ -r /usr/local/lib/wp-hosting-notify.sh ]] && . /usr/local/lib/wp-hosting-notify.sh
+if $NOTIFY && [[ "$STATUS" == "down" ]] && command -v notify >/dev/null 2>&1; then
+    notify "Backup-Verify fehlgeschlagen" "${MSG}"
 fi
 
 [[ "$STATUS" == "up" ]] && exit 0 || exit 1

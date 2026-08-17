@@ -116,7 +116,7 @@ if [[ -z "${NPM_IP:-}" ]]; then
 fi
 
 # Optionale Felder (leer erlaubt) — nur interaktiv erfragen wenn nicht in Config gesetzt.
-WEBHOOK_URL="${WEBHOOK_URL:-}";  $NONINT || read -rp "Webhook-URL für Benachrichtigungen (leer = deaktiviert): " WEBHOOK_URL
+SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}";  $NONINT || read -rp "Slack Incoming Webhook-URL für Alerts (leer = deaktiviert): " SLACK_WEBHOOK_URL
 SEOPRESS_KEY="${SEOPRESS_KEY:-}"; $NONINT || { read -rsp "SEOpress Pro Lizenz-Key (leer = überspringen): " SEOPRESS_KEY; echo ""; }
 # Zentrale Matomo-Instanz (Host ohne https:// und ohne Slash, z.B. analytics.example.com).
 # Nur informativ in /etc/wp-hosting/config — Matomo-Site-Anlage + SEOpress-Tracking
@@ -261,7 +261,7 @@ APT_OPTS=(-o DPkg::Lock::Timeout=300)
 apt-get "${APT_OPTS[@]}" update -q
 DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" upgrade -yq
 DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -yq --no-install-recommends \
-    curl wget unzip git ca-certificates gnupg age qemu-guest-agent \
+    curl wget unzip git jq ca-certificates gnupg age qemu-guest-agent \
     fail2ban ufw mysql-client \
     unattended-upgrades apt-listchanges \
     nginx redis-server \
@@ -926,12 +926,19 @@ else
     log "Netdata installiert (Port 19999, Loopback)"
 fi
 # Web-UI strikt auf Loopback binden (idempotent). Ein minimales netdata.conf mergt mit
-# den compiled Defaults — nur der [web]-Bind wird überschrieben.
-if command -v netdata &>/dev/null && ! grep -qs "bind socket to IP = 127.0.0.1" /etc/netdata/netdata.conf; then
+# den compiled Defaults — nur [web]-Bind + [health] werden überschrieben.
+# WICHTIG: moderne netdata-Syntax "bind to" verwenden — das veraltete
+# "bind socket to IP" ignorieren aktuelle Versionen, dann bindet netdata weiter
+# auf 0.0.0.0 (:19999 im VLAN offen). [health]=no: Children alarmieren nicht
+# lokal, das übernimmt der Parent (konsistent mit configure-netdata-child.sh).
+if command -v netdata &>/dev/null && ! grep -qs "bind to = 127.0.0.1" /etc/netdata/netdata.conf; then
     mkdir -p /etc/netdata
     cat > /etc/netdata/netdata.conf <<'NDEOF'
 [web]
-    bind socket to IP = 127.0.0.1
+    bind to = 127.0.0.1
+    allow connections from = localhost
+[health]
+    enabled = no
 NDEOF
     systemctl restart netdata 2>/dev/null || true
     log "Netdata Web-UI auf 127.0.0.1 gebunden"
@@ -1096,12 +1103,11 @@ fi
 
 echo "[\$(date '+%Y-%m-%d %H:%M')] Datei-Backup abgeschlossen (Fehler: \${ERRORS})" >> "\$LOG"
 
-# Webhook bei Fehler
-source /etc/wp-hosting/config 2>/dev/null || true
-if [[ \${ERRORS} -gt 0 ]] && [[ -n "\${WEBHOOK_URL:-}" ]]; then
-    MSG="Backup FEHLER: \${ERRORS} Fehler beim WP-Datei-Backup — \$(hostname -s)"
-    curl -fsS -G --data-urlencode "msg=\${MSG}" "\${WEBHOOK_URL}?status=down" \
-        -o /dev/null 2>/dev/null || true
+# Slack-Alarm bei Fehler
+[[ -r /usr/local/lib/wp-hosting-notify.sh ]] && . /usr/local/lib/wp-hosting-notify.sh
+if [[ \${ERRORS} -gt 0 ]]; then
+    command -v notify >/dev/null 2>&1 && \
+        notify "WP-Datei-Backup fehlgeschlagen" "\${ERRORS} Fehler beim Datei-Backup/Remote-Sync — Details: \$LOG"
 fi
 
 # Mit Fehleranzahl beenden, damit Cron/Cronicle/Uptime einen kaputten Lauf erkennt
@@ -1140,22 +1146,18 @@ cat > /usr/local/bin/disk-alert.sh <<'ALERTEOF'
 # Sendet Webhook-Alert bei vollem Speicher, Recovery-Alert wenn wieder OK.
 set -euo pipefail
 
-source /etc/wp-hosting/config 2>/dev/null || exit 0
-[[ -z "${WEBHOOK_URL:-}" ]] && exit 0
+[[ -r /usr/local/lib/wp-hosting-notify.sh ]] || exit 0
+. /usr/local/lib/wp-hosting-notify.sh
+[[ -r /etc/wp-hosting/slack-webhook.txt ]] || exit 0
 
 THRESHOLD_WARN=80    # % belegt → Warnung
 THRESHOLD_CRIT=90    # % belegt → Kritisch
-HOST=$(hostname -s)
 STATE_DIR="/var/lib/wp-hosting/disk-state"
 mkdir -p "$STATE_DIR"
 
 send_webhook() {
     local status="$1" emoji="$2" level="$3" mount="$4" pct="$5" avail="$6"
-    local msg="${emoji} Disk ${level}: ${HOST} | ${mount} | ${pct}% belegt | ${avail} frei"
-    curl -fsS -G \
-        --data-urlencode "msg=${msg}" \
-        "${WEBHOOK_URL}?status=${status}" \
-        -o /dev/null 2>/dev/null || true
+    notify "Disk ${level}" "${emoji} ${mount} | ${pct}% belegt | ${avail} frei"
 }
 
 while IFS= read -r line; do
@@ -1194,8 +1196,9 @@ cat > /usr/local/bin/ssl-monitor.sh <<'SSLEOF'
 # Optimiert für NPMplus mit Let's Encrypt Short-Lived Certificates (6 Tage).
 set -euo pipefail
 
-source /etc/wp-hosting/config 2>/dev/null || exit 0
-[[ -z "${WEBHOOK_URL:-}" ]] && exit 0
+[[ -r /usr/local/lib/wp-hosting-notify.sh ]] || exit 0
+. /usr/local/lib/wp-hosting-notify.sh
+[[ -r /etc/wp-hosting/slack-webhook.txt ]] || exit 0
 
 CRIT_DAYS=2     # Alert wenn < 2 Tage — Erneuerung definitiv fehlgeschlagen
 SITES_DIR="/etc/wp-hosting/sites"
@@ -1206,10 +1209,7 @@ mkdir -p "$STATE_DIR"
 
 send_webhook() {
     local status="$1" emoji="$2" msg="$3"
-    curl -fsS -G \
-        --data-urlencode "msg=${emoji} ${msg}" \
-        "${WEBHOOK_URL}?status=${status}" \
-        -o /dev/null 2>/dev/null || true
+    notify "SSL-Monitor" "${emoji} ${msg}"
 }
 
 for cred_file in "${SITES_DIR}"/*.txt; do
@@ -1324,7 +1324,6 @@ mkdir -p /etc/wp-hosting/plugins
     printf 'DB_ADMIN_PASS=%q\n'  "${DB_ADMIN_PASS}"
     printf 'WP_ADMIN_EMAIL=%q\n' "${WP_ADMIN_EMAIL}"
     printf 'NPM_IP=%q\n'         "${NPM_IP}"
-    printf 'WEBHOOK_URL=%q\n'    "${WEBHOOK_URL:-}"
     printf 'RCLONE_REMOTE=%q\n'  "${RCLONE_REMOTE:-}"
     printf 'RCLONE_DEST=%q\n'    "${RCLONE_DEST:-}"
     printf 'PLUGIN_BUCKET=%q\n'  "${PLUGIN_BUCKET:-}"
@@ -1334,7 +1333,46 @@ mkdir -p /etc/wp-hosting/plugins
     printf 'PMA_AUTH_PASS=%q\n'  "${PMA_AUTH_PASS}"
 } > /etc/wp-hosting/config
 chmod 600 /etc/wp-hosting/config   # enthält DB-Admin-Passwort
-chmod 600 /etc/wp-hosting/config
+
+# ── Slack-Alerts (notify-Helper) ───────────────────────────────────────────
+# notify() postet in einen Slack Incoming Webhook (POST JSON {text}); wird von
+# wp-backup-files.sh, disk-alert.sh, ssl-monitor.sh, backup-verify.sh und
+# db-cleanup.sh gesourct. Fehlt die Webhook-Datei, ist notify() ein No-Op —
+# ein Alarm darf das aufrufende Script nie killen. Muster identisch zu setup-db.sh.
+cat > /usr/local/lib/wp-hosting-notify.sh <<'NOTIFYEOF'
+#!/bin/bash
+# Zentrale Slack-Benachrichtigung für die wp-hosting Web-VM-Scripts.
+# Wird gesourct (nicht direkt ausgeführt) und stellt notify() bereit.
+SLACK_WEBHOOK_FILE="${SLACK_WEBHOOK_FILE:-/etc/wp-hosting/slack-webhook.txt}"
+
+# notify <titel> <details>
+notify() {
+    local title="${1:-wp-hosting-web}" body="${2:-}"
+    [[ -r "$SLACK_WEBHOOK_FILE" ]] || return 0
+    local url
+    url=$(tr -d '[:space:]' < "$SLACK_WEBHOOK_FILE") || return 0
+    [[ -n "$url" ]] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    local text
+    text=":rotating_light: *${title}* auf \`$(hostname -s)\`"$'\n'"${body}"
+    local payload
+    payload=$(jq -nc --arg t "$text" '{text: $t}') || return 0
+    curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+        --data "$payload" "$url" >/dev/null 2>&1 || true
+    return 0
+}
+NOTIFYEOF
+chmod 0755 /usr/local/lib/wp-hosting-notify.sh
+log "Slack-Helper installiert: /usr/local/lib/wp-hosting-notify.sh"
+
+# Slack Incoming Webhook-URL als Secret ablegen (notify() liest sie dort).
+if [[ -n "${SLACK_WEBHOOK_URL:-}" ]]; then
+    printf '%s\n' "$SLACK_WEBHOOK_URL" > /etc/wp-hosting/slack-webhook.txt
+    chmod 600 /etc/wp-hosting/slack-webhook.txt
+    log "Slack-Webhook hinterlegt — Backup-/Disk-/SSL-Alerts gehen an Slack"
+else
+    warn "Keine SLACK_WEBHOOK_URL gesetzt — Alerts bleiben lokal (notify() ist No-Op)"
+fi
 
 # ── Services starten ──────────────────────────────────────────────────────
 systemctl restart php8.3-fpm
@@ -1385,5 +1423,5 @@ echo -e "${YELLOW}  → phpMyAdmin- und Filebrowser-Passwort notieren!${NC}"
 [[ -n "${SEOPRESS_KEY:-}" ]] && \
     echo -e "${YELLOW}  → SEOpress Pro ZIP hochladen: scp wp-seopress-pro-*.zip root@$(hostname -I | awk '{print $1}'):/etc/wp-hosting/plugins/seopress-pro.zip${NC}"
 echo -e "${YELLOW}  → NPM Proxy-Hosts für Port 8080, 8090 und 19999 anlegen.${NC}"
-echo -e "${YELLOW}  → Netdata in Uptime Kuma als Monitor hinzufügen.${NC}"
+echo -e "${YELLOW}  → Slack-Alerts aktiv (Backup/Disk/SSL), sofern SLACK_WEBHOOK_URL gesetzt war.${NC}"
 echo ""
