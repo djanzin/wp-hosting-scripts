@@ -84,8 +84,14 @@ UPDATED=(); FAILED=(); SKIPPED=()
 
 for DOMAIN in "${SITES_TO_UPDATE[@]}"; do
     SITE_PATH="/var/www/${DOMAIN}"
-    DOMAIN_SAFE=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
-    SYSTEM_USER="wp_${DOMAIN_SAFE:0:20}"
+    # Systemuser aus der Cred-Datei (install-wp benennt ihn wp_<12-alnum>_<sha256-8>);
+    # die frühere Ableitung aus der Domain ergab einen nicht existierenden Namen, der
+    # chown auf das Wartungs-Flag lief dadurch ins Leere.
+    SYSTEM_USER=$(sed -nE 's/^System-User:[[:space:]]*//p' "${SITES_DIR}/${DOMAIN}.txt" 2>/dev/null | head -1)
+    if [[ -z "$SYSTEM_USER" ]]; then
+        DOMAIN_SAFE="$(printf '%s' "$DOMAIN" | tr -cd 'a-z0-9' | cut -c1-12)_$(printf '%s' "$DOMAIN" | sha256sum | cut -c1-8)"
+        SYSTEM_USER="wp_${DOMAIN_SAFE}"
+    fi
 
     if [[ ! -d "$SITE_PATH" ]]; then
         warn "Verzeichnis nicht gefunden: ${SITE_PATH} — übersprungen"

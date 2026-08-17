@@ -44,9 +44,18 @@ DOMAIN=$(echo "$DOMAIN" | tr '[:upper:]' '[:lower:]' | sed 's/^www\.//')
 CRED_FILE="${SITES_DIR}/${DOMAIN}.txt"
 [[ ! -f "$CRED_FILE" ]] && err "Site '${DOMAIN}' nicht gefunden."
 
-DOMAIN_SAFE=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
 SITE_PATH="/var/www/${DOMAIN}"
-SYSTEM_USER="wp_${DOMAIN_SAFE:0:20}"
+# Systemuser aus der Cred-Datei lesen, NICHT aus der Domain ableiten: install-wp benennt
+# ihn wp_<12-alnum>_<sha256-8>. Die alte Ableitung ergab einen nicht existierenden Namen
+# — die chown -R auf wp-content wären damit ins Leere gelaufen und hätten die
+# wiederhergestellten Dateien im falschen Eigentum gelassen (Site kann nicht schreiben).
+SYSTEM_USER=$(sed -nE 's/^System-User:[[:space:]]*//p' "$CRED_FILE" | head -1)
+if [[ -z "$SYSTEM_USER" ]]; then
+    DOMAIN_SAFE="$(printf '%s' "$DOMAIN" | tr -cd 'a-z0-9' | cut -c1-12)_$(printf '%s' "$DOMAIN" | sha256sum | cut -c1-8)"
+    SYSTEM_USER="wp_${DOMAIN_SAFE}"
+    warn "System-User nicht in ${CRED_FILE} — abgeleitet: ${SYSTEM_USER}"
+fi
+id "$SYSTEM_USER" &>/dev/null || err "Systemuser '${SYSTEM_USER}' existiert nicht — Restore abgebrochen (Dateirechte wären falsch)."
 
 DB_NAME=$(grep "^DB-Name:" "$CRED_FILE" | awk '{print $2}')
 DB_USER=$(grep "^DB-User:" "$CRED_FILE" | awk '{print $2}')

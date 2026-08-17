@@ -1139,6 +1139,15 @@ if [[ -f "$(dirname "$0")/db-cleanup.sh" ]]; then
     log "DB-Cleanup eingerichtet (sonntags 05:00 → /var/log/wp-db-cleanup.log)"
 fi
 
+# Maintenance-Mode-Umschalter auf die VM legen (kein Cron — wird von Hand bzw. von
+# deploy-site.sh --go-live aufgerufen). Ohne das lag das Script nur im Repo und der
+# Wartungsmodus musste per rm auf dem Flag aufgehoben werden.
+if [[ -f "$(dirname "$0")/maintenance.sh" ]]; then
+    cp "$(dirname "$0")/maintenance.sh" /usr/local/bin/maintenance.sh
+    chmod +x /usr/local/bin/maintenance.sh
+    log "maintenance.sh installiert (/usr/local/bin/maintenance.sh, --status | --domain X --live|--maintenance --yes)"
+fi
+
 # ── Disk Space Alert Script ───────────────────────────────────────────────
 cat > /usr/local/bin/disk-alert.sh <<'ALERTEOF'
 #!/bin/bash
