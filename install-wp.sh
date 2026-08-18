@@ -1065,7 +1065,13 @@ fi
 # ── Site-Type-spezifische Pro-Plugins ─────────────────────────────────────
 if [[ "$SITE_TYPE" == "wordpress" ]]; then
     # PostX Pro — Tech-Blog-Blocks (Reviews, Comparison-Tables, Query Loops)
+    # Pro ist ein Add-on und braucht die aktive Free-Basis (wp.org-Slug: ultimate-post)
     if [[ -f "${PLUGINS_DIR}/postxpro.zip" ]]; then
+        if sudo -u "$SYSTEM_USER" wp plugin install ultimate-post --activate --path="$SITE_PATH" --allow-root 2>/dev/null; then
+            log "PostX (Free-Basis) installiert"
+        else
+            warn "PostX Free fehlgeschlagen (Slug: ultimate-post) — Pro läuft ohne Basis nicht"
+        fi
         install_local_zip "${PLUGINS_DIR}/postxpro.zip" "PostX Pro"
         log "PostX Pro installiert (Review-/Comparison-Blocks für Tech-Blogs)"
     fi
@@ -1073,13 +1079,25 @@ fi
 
 if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     # WowStore Pro — Shop-Erweiterung (Quick-View, Filter, Wishlist, Produktgalerien)
+    # Pro ist ein Add-on und braucht die aktive Free-Basis (wp.org-Slug: product-blocks)
     if [[ -f "${PLUGINS_DIR}/wowstore-pro.zip" ]]; then
+        if sudo -u "$SYSTEM_USER" wp plugin install product-blocks --activate --path="$SITE_PATH" --allow-root 2>/dev/null; then
+            log "WowStore (Free-Basis) installiert"
+        else
+            warn "WowStore Free fehlgeschlagen (Slug: product-blocks) — Pro läuft ohne Basis nicht"
+        fi
         install_local_zip "${PLUGINS_DIR}/wowstore-pro.zip" "WowStore Pro"
         log "WowStore Pro installiert (Shop-Erweiterungen)"
     fi
 
     # WowRevenue Pro — On-Site-Funnels (One-Click Upsells, Order Bumps, Cross-Sells)
+    # Pro ist ein Add-on und braucht die aktive Free-Basis (wp.org-Slug: revenue)
     if [[ -f "${PLUGINS_DIR}/wowrevenue-pro.zip" ]]; then
+        if sudo -u "$SYSTEM_USER" wp plugin install revenue --activate --path="$SITE_PATH" --allow-root 2>/dev/null; then
+            log "WowRevenue (Free-Basis) installiert"
+        else
+            warn "WowRevenue Free fehlgeschlagen (Slug: revenue) — Pro läuft ohne Basis nicht"
+        fi
         install_local_zip "${PLUGINS_DIR}/wowrevenue-pro.zip" "WowRevenue Pro"
         log "WowRevenue Pro installiert (On-Site Upsell-/Cross-Sell-Funnels)"
     fi
