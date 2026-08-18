@@ -827,6 +827,7 @@ sudo -u "$SYSTEM_USER" wp config create \
     --dbcollate="utf8mb4_unicode_ci" \
     --extra-php="define('WP_REDIS_HOST', '127.0.0.1');
 define('WP_REDIS_PORT', 6379);
+define('WP_REDIS_DISABLE_BANNERS', true);
 define('WP_CACHE_KEY_SALT', '${DOMAIN}:');
 define('DISABLE_WP_CRON', true);
 define('WP_POST_REVISIONS', 5);
@@ -1074,6 +1075,61 @@ if [[ "$SITE_TYPE" == "wordpress" ]]; then
         fi
         install_local_zip "${PLUGINS_DIR}/postxpro.zip" "PostX Pro"
         log "PostX Pro installiert (Review-/Comparison-Blocks für Tech-Blogs)"
+
+        # Lizenz hinterlegen UND aktivieren — wie bei Fluent Forms Pro ist das Setzen
+        # der Option allein wertlos: die Aktivierung ist ein EDD-Remote-Call an
+        # account.wpxpo.com (activate_license, item_id 181). Der Handler unten macht
+        # exakt das, was der wp_ajax_edd_ultp_activate_license-Handler des Plugins tut
+        # (classes/updater/class-license.php), nur ohne Admin-Session. Der Key kommt
+        # per Env, nie durch argv.
+        if [[ -n "${POSTX_KEY:-}" ]]; then
+            PX_ACT_PHP=$(mktemp /tmp/pxact.XXXXXX.php)
+            cat > "$PX_ACT_PHP" <<'PXEOF'
+<?php
+$key = trim(getenv('PX_LICENSE_KEY'));
+if (!$key) { echo "no-key\n"; return; }
+$resp = wp_remote_post('https://account.wpxpo.com', array(
+    'timeout'   => 50,
+    'sslverify' => false,
+    'body'      => array(
+        'edd_action' => 'activate_license',
+        'license'    => $key,
+        'item_id'    => 181,
+        'url'        => home_url(),
+    ),
+));
+if (is_wp_error($resp) || 200 !== wp_remote_retrieve_response_code($resp)) { echo "http-error\n"; return; }
+$data = json_decode(wp_remote_retrieve_body($resp));
+if (!empty($data->success)) {
+    update_option('edd_ultp_license_key', $key);
+    update_option('edd_ultp_license_data', (array) $data);
+    echo (isset($data->license) ? $data->license : 'valid') . "\n";
+} else {
+    echo 'failed:' . (isset($data->error) ? $data->error : 'unknown') . "\n";
+}
+PXEOF
+            chmod 644 "$PX_ACT_PHP"
+            PX_STATUS=$(PX_LICENSE_KEY="$POSTX_KEY" sudo -u "$SYSTEM_USER" --preserve-env=PX_LICENSE_KEY \
+                wp eval-file "$PX_ACT_PHP" --path="$SITE_PATH" --allow-root 2>/dev/null | tr -d '\r' | tail -1)
+            rm -f "$PX_ACT_PHP"
+            if [[ "$PX_STATUS" == "valid" ]]; then
+                log "PostX Pro Lizenz aktiviert"
+            else
+                warn "PostX Pro Lizenz NICHT aktiviert (Status: ${PX_STATUS:-keine Antwort}) — im wp-admin nachholen"
+            fi
+        fi
+
+        # Addons konfigurieren (Option ultp_options): SEOPress an — PostX zeigt dann
+        # SEOPress-Meta-Descriptions statt Excerpts. Elementor aus — wir bauen mit
+        # Gutenberg. ChatGPT aus — will den OpenAI-Key im Klartext in wp_options und
+        # kennt nur veraltete Modelle (Entscheidung 2026-08-18).
+        sudo -u "$SYSTEM_USER" wp eval '
+            $o = get_option("ultp_options", array()); if (!is_array($o)) $o = array();
+            $o["ultp_seopress"] = "true"; $o["ultp_elementor"] = "false"; $o["ultp_chatgpt"] = "false";
+            update_option("ultp_options", $o); echo "ok";
+        ' --path="$SITE_PATH" --allow-root >/dev/null 2>&1 \
+            && log "PostX: SEOPress-Addon an; Elementor + ChatGPT aus" \
+            || warn "PostX: Addon-Konfiguration fehlgeschlagen"
     fi
 fi
 
@@ -1295,8 +1351,84 @@ if [[ "$SITE_TYPE" == "woocommerce" ]]; then
     log "Rechtliche Seiten angelegt: Impressum (${IMPRESSUM_ID}), Datenschutz (${DATENSCHUTZ_ID}), AGB (${AGB_ID}), Widerruf (${WIDERRUF_ID}), Lieferung (${LIEFERUNG_ID})"
 fi
 
+# ── Admin-Notices aufräumen ───────────────────────────────────────────────
+# Entfernt die Dauer-Banner der Stack-Plugins im Dashboard, indem genau die
+# Dismissal-Persistenz gesetzt wird, die der jeweilige Klick setzen wuerde —
+# KEIN pauschales Notice-Unterdruecken (echte Warnungen bleiben sichtbar).
+# Redis-Banner laufen ueber WP_REDIS_DISABLE_BANNERS in der wp-config (oben).
+NOTICE_PHP=$(mktemp /tmp/notices.XXXXXX.php)
+cat > "$NOTICE_PHP" <<'NOTICEEOF'
+<?php
+// Converter for Media: Welcome-Notice (zeigt bis webpc_is_new_installation != '1')
+update_option('webpc_is_new_installation', '0');
+
+// Blocksy Companion (Freemius): Opt-in-Notice per anonymem Skip beenden
+if (function_exists('blocksy_companion_fs') && is_object(blocksy_companion_fs())) {
+    try { blocksy_companion_fs()->skip_connection(); } catch (\Throwable $e) {}
+}
+
+// PostX: Datensammel-Notice (Durbin) — derselbe Transient, den der X-Klick setzt
+if (class_exists('\ULTP\Includes\Durbin\Xpo')) {
+    \ULTP\Includes\Durbin\Xpo::set_transient_without_cache('ultp_durbin_notice_ultp_durbin_dc1', 'off');
+} else {
+    update_option('_transient_ultp_durbin_notice_ultp_durbin_dc1', 'off');
+}
+
+// Core: "Welcome to WordPress!"-Panel aus + Standard-Anordnung der Dashboard-Widgets
+// (Referenz-Layout von 4you.download, 2026-08-18: Redis+Matomo | Consent+GA |
+// FluentSMTP | Site Health+Fluent Forms). Unbekannte Widget-IDs ignoriert WP einfach.
+$widget_order = array(
+    'normal'  => 'dashboard_rediscache,seopress_matomo_dashboard_widget',
+    'side'    => 'faz_consent_widget,seopress_ga_dashboard_widget',
+    'column3' => 'fluentsmtp_reports_widget',
+    'column4' => 'dashboard_site_health,fluentform_stat_widget',
+);
+foreach (get_users(array('role' => 'administrator', 'fields' => 'ID')) as $uid) {
+    update_user_meta($uid, 'show_welcome_panel', 0);
+    update_user_meta($uid, 'meta-box-order_dashboard', $widget_order);
+}
+echo "notices-cleaned\n";
+NOTICEEOF
+chmod 644 "$NOTICE_PHP"
+if sudo -u "$SYSTEM_USER" wp eval-file "$NOTICE_PHP" --path="$SITE_PATH" --allow-root 2>/dev/null | grep -q 'notices-cleaned'; then
+    log "Admin-Notices aufgeräumt (WebP/Blocksy/PostX/Welcome-Panel; Redis via wp-config)"
+else
+    warn "Admin-Notices-Aufräumen fehlgeschlagen — Banner ggf. im Dashboard wegklicken"
+fi
+rm -f "$NOTICE_PHP"
+
 # ── Must-Use Plugin: Cache-Check deaktivieren ────────────────────────────
 mkdir -p "${SITE_PATH}/wp-content/mu-plugins"
+
+# Dashboard entrümpeln: die vier Core-Widgets (At a Glance, Activity, Quick Draft,
+# Events and News) braucht auf den Hosting-Sites niemand — die nützlichen Widgets
+# (Redis, Site Health, FluentSMTP, Fluent Forms, Matomo, Cookie Consent) bleiben.
+cat > "${SITE_PATH}/wp-content/mu-plugins/dashboard-cleanup.php" <<'MUPLUGIN'
+<?php
+/**
+ * Plugin Name: Dashboard Cleanup
+ * Description: Entfernt die vier Core-Dashboard-Widgets (At a Glance, Activity, Quick Draft, Events and News).
+ */
+add_action('wp_dashboard_setup', function () {
+    remove_meta_box('dashboard_right_now',   'dashboard', 'normal'); // At a Glance
+    remove_meta_box('dashboard_activity',    'dashboard', 'normal'); // Activity
+    remove_meta_box('dashboard_quick_press', 'dashboard', 'side');   // Quick Draft
+    remove_meta_box('dashboard_primary',     'dashboard', 'side');   // WP Events and News
+}, 99);
+MUPLUGIN
+
+# Blocksy-Footer: Standard-Copyright auf den Site-Titel statt "WordPress Theme by
+# Creative Themes". Greift nur, solange im Customizer nichts anderes gesetzt ist.
+cat > "${SITE_PATH}/wp-content/mu-plugins/footer-copyright.php" <<'MUPLUGIN'
+<?php
+/**
+ * Plugin Name: Footer Copyright
+ * Description: Blocksy-Footer-Copyright-Standard: Jahr + Site-Titel statt Theme-Werbung.
+ */
+add_filter('blocksy:footer:copyright:default-value', function () {
+    return 'Copyright &copy; {current_year} &ndash; {site_title}';
+});
+MUPLUGIN
 
 cat > "${SITE_PATH}/wp-content/mu-plugins/server-cache.php" <<'MUPLUGIN'
 <?php
