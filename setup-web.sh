@@ -1143,6 +1143,15 @@ if [[ -f "$(dirname "$0")/db-cleanup.sh" ]]; then
     log "DB-Cleanup eingerichtet (sonntags 05:00 → /var/log/wp-db-cleanup.log)"
 fi
 
+# FluentSMTP-Konfigurator auf die VM legen (kein Cron — wird vom Provisioning pro Site
+# aufgerufen). Credentials fliessen ausschliesslich per stdin; das Script gibt nie
+# Werte aus (nur Laengen/Status).
+if [[ -f "$(dirname "$0")/fluentsmtp-configure.sh" ]]; then
+    install -D -m 700 "$(dirname "$0")/fluentsmtp-configure.sh" /usr/local/sbin/fluentsmtp-configure.sh
+    install -D -m 644 "$(dirname "$0")/fluentsmtp-set.php" /usr/local/lib/wp-hosting/fluentsmtp-set.php
+    log "fluentsmtp-configure.sh installiert (/usr/local/sbin, SMTP-Creds via stdin)"
+fi
+
 # Maintenance-Mode-Umschalter auf die VM legen (kein Cron — wird von Hand bzw. von
 # deploy-site.sh --go-live aufgerufen). Ohne das lag das Script nur im Repo und der
 # Wartungsmodus musste per rm auf dem Flag aufgehoben werden.
