@@ -30,9 +30,11 @@ case "$SMTP_USER" in
 esac
 [ "${#SMTP_PASS}" -ge 30 ] || { echo "FEHLER: SMTP-Passwort zu kurz (Laenge ${#SMTP_PASS})" >&2; exit 1; }
 
-sudo -n -u "$SITE_USER" env \
-    FSMTP_SENDER="$SENDER" FSMTP_NAME="$NAME" FSMTP_HOST="$HOST" FSMTP_PORT="$PORT" \
-    FSMTP_USER="$SMTP_USER" FSMTP_PASS="$SMTP_PASS" \
+# Env-Prefix + --preserve-env statt `sudo env VAR=...` — Letzteres legt die Werte
+# in die argv des env-Prozesses und damit fuer die Laufzeit in die Prozessliste.
+FSMTP_SENDER="$SENDER" FSMTP_NAME="$NAME" FSMTP_HOST="$HOST" FSMTP_PORT="$PORT" \
+FSMTP_USER="$SMTP_USER" FSMTP_PASS="$SMTP_PASS" \
+sudo -n -u "$SITE_USER" --preserve-env=FSMTP_SENDER,FSMTP_NAME,FSMTP_HOST,FSMTP_PORT,FSMTP_USER,FSMTP_PASS \
     wp --path="$SITE_PATH" eval-file "$PHP_FILE" 2>&1 \
     | sed -E "s/(AKIA[A-Za-z0-9]{16}|[A-Za-z0-9+\/=]{30,})/<redacted>/g"
 
