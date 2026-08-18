@@ -1007,6 +1007,40 @@ FLUENTFORM_PRO_ZIP="/etc/wp-hosting/plugins/fluentformpro.zip"
 if [[ -f "$FLUENTFORM_PRO_ZIP" ]]; then
     sudo -u "$SYSTEM_USER" wp plugin install "$FLUENTFORM_PRO_ZIP" --activate --path="$SITE_PATH" --allow-root || warn "Install-Schritt fehlgeschlagen, uebersprungen"
     log "Fluent Forms + Fluent Forms Pro installiert"
+
+    # Lizenz hinterlegen UND aktivieren. Das blosse Setzen der Option genuegt NICHT —
+    # die Aktivierung ist ein Remote-Call (EDD activate_license) an wpmanageninja.
+    # tryActivateLicense() ist genau der Handler, den auch das Admin-Formular ausloest.
+    # Der Key wird per eval-file uebergeben, damit er nicht in der Prozessliste steht.
+    # Hinweis: FluentFormAddOnChecker ist eine plugin-interne Klasse, kein offizielles
+    # API — schlaegt der Aufruf fehl (z.B. nach Umbenennung), gibt es nur eine Warnung.
+    if [[ -n "${FLUENTFORM_KEY:-}" ]]; then
+        FF_ACT_PHP=$(mktemp /tmp/ffact.XXXXXX.php)
+        chmod 600 "$FF_ACT_PHP"
+        cat > "$FF_ACT_PHP" <<'FFEOF'
+<?php
+$key = trim(getenv('FF_LICENSE_KEY'));
+if (!$key) { echo "no-key\n"; return; }
+update_option('_ff_fluentform_pro_license_key', $key);
+if (!class_exists('FluentFormAddOnChecker')) { echo "no-class\n"; return; }
+$checker = FluentFormAddOnChecker::getInstance();
+if (!is_object($checker) || !method_exists($checker, 'tryActivateLicense')) { echo "no-method\n"; return; }
+$res = $checker->tryActivateLicense($key);
+echo (is_array($res) && isset($res['status'])) ? $res['status'] . "\n" : "unknown\n";
+FFEOF
+        # Kein chown: die Datei enthaelt keinen Schluessel (der kommt per Env), sie muss
+        # nur vom Site-User lesbar sein. Ein Eigentuemerwechsel wuerde das spaetere rm
+        # in /tmp (Sticky Bit) unnoetig erschweren.
+        chmod 644 "$FF_ACT_PHP"
+        FF_STATUS=$(FF_LICENSE_KEY="$FLUENTFORM_KEY" sudo -u "$SYSTEM_USER" --preserve-env=FF_LICENSE_KEY \
+            wp eval-file "$FF_ACT_PHP" --path="$SITE_PATH" --allow-root 2>/dev/null | tr -d '\r' | tail -1)
+        rm -f "$FF_ACT_PHP"
+        if [[ "$FF_STATUS" == "valid" ]]; then
+            log "Fluent Forms Pro Lizenz aktiviert"
+        else
+            warn "Fluent Forms Pro Lizenz NICHT aktiviert (Status: ${FF_STATUS:-keine Antwort}) — im wp-admin nachholen"
+        fi
+    fi
 else
     log "Fluent Forms (Free) installiert — Pro-ZIP nicht gefunden (→ /etc/wp-hosting/plugins/fluentformpro.zip)"
 fi

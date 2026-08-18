@@ -118,6 +118,10 @@ fi
 # Optionale Felder (leer erlaubt) — nur interaktiv erfragen wenn nicht in Config gesetzt.
 SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}";  $NONINT || read -rp "Slack Incoming Webhook-URL für Alerts (leer = deaktiviert): " SLACK_WEBHOOK_URL
 SEOPRESS_KEY="${SEOPRESS_KEY:-}"; $NONINT || { read -rsp "SEOpress Pro Lizenz-Key (leer = überspringen): " SEOPRESS_KEY; echo ""; }
+# Fluent Forms Pro: Lizenz-Key wird pro Site in die WP-Option geschrieben UND aktiviert
+# (install-wp ruft dazu die Aktivierungsmethode des Plugins auf). Lifetime-Lizenz ohne
+# Site-Limit → unbedenklich fuer jede Site.
+FLUENTFORM_KEY="${FLUENTFORM_KEY:-}"; $NONINT || { read -rsp "Fluent Forms Pro Lizenz-Key (leer = überspringen): " FLUENTFORM_KEY; echo ""; }
 # Zentrale Matomo-Instanz (Host ohne https:// und ohne Slash, z.B. analytics.example.com).
 # Nur informativ in /etc/wp-hosting/config — Matomo-Site-Anlage + SEOpress-Tracking
 # laufen zentral über provision-endpoint.sh (der Matomo-Token bleibt dort, nicht auf der VM).
@@ -1338,6 +1342,7 @@ mkdir -p /etc/wp-hosting/plugins
     printf 'PLUGIN_BUCKET=%q\n'  "${PLUGIN_BUCKET:-}"
     printf 'THEME_BUCKET=%q\n'   "${THEME_BUCKET:-}"
     printf 'SEOPRESS_KEY=%q\n'   "${SEOPRESS_KEY:-}"
+    printf 'FLUENTFORM_KEY=%q\n' "${FLUENTFORM_KEY:-}"
     printf 'MATOMO_URL=%q\n'     "${MATOMO_URL:-}"
     printf 'PMA_AUTH_PASS=%q\n'  "${PMA_AUTH_PASS}"
 } > /etc/wp-hosting/config
