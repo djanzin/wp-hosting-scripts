@@ -385,6 +385,9 @@ php_admin_value[post_max_size]        = 128M
 php_admin_value[max_execution_time]   = 600
 php_admin_value[max_input_time]       = 600
 php_admin_value[max_input_vars]       = 10000
+; cURL/Socket-Timeout hoch: MainWP-Child-Sync macht lange Requests; MainWP-Systemcheck
+; warnt sonst "Low cURL timeout" (Default 60s, Empfehlung >= 300s).
+php_admin_value[default_socket_timeout] = 300
 php_admin_value[error_log]            = /var/log/php/${DOMAIN}.error.log
 php_admin_flag[log_errors]            = on
 
@@ -1061,6 +1064,18 @@ PLUGINS_DIR="/etc/wp-hosting/plugins"
 if [[ -f "${PLUGINS_DIR}/blocksy-companion-pro.zip" ]]; then
     install_local_zip "${PLUGINS_DIR}/blocksy-companion-pro.zip" "Blocksy Companion Pro"
     log "Blocksy Companion Pro installiert (Theme-Builder, Header/Footer, Custom Post Types)"
+fi
+
+# ── TranslatePress (Mehrsprachigkeit) — Free-Basis + Business-Addon ────────
+# Beide ZIPs kommen aus dem Bucket (Dany laedt dort die aktuellen Staende hoch);
+# das Business-Addon laeuft nur mit aktiver Free-Basis, daher diese Reihenfolge.
+if [[ -f "${PLUGINS_DIR}/translatepress-free.zip" ]]; then
+    install_local_zip "${PLUGINS_DIR}/translatepress-free.zip" "TranslatePress"
+    log "TranslatePress (Free-Basis) installiert"
+    if [[ -f "${PLUGINS_DIR}/translatepress-business.zip" ]]; then
+        install_local_zip "${PLUGINS_DIR}/translatepress-business.zip" "TranslatePress Business"
+        log "TranslatePress Business installiert (Mehrsprachigkeits-Addon)"
+    fi
 fi
 
 # ── Site-Type-spezifische Pro-Plugins ─────────────────────────────────────
